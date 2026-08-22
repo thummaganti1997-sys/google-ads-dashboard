@@ -1,0 +1,3 @@
+Flask
+google-ads
+google-auth-oauthlib
