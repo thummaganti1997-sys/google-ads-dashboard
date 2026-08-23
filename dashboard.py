@@ -961,6 +961,209 @@ else:
     st.info(
         "No campaign data available for budget optimization."
     )
+   # ==================================================
+# KEYWORD PERFORMANCE ANALYSIS
+# ==================================================
+
+st.divider()
+st.header("🔑 Keyword Performance Analysis")
+
+try:
+
+    keyword_query = f"""
+        SELECT
+            ad_group_criterion.keyword.text,
+            campaign.name,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.cost_micros,
+            metrics.conversions
+        FROM keyword_view
+        WHERE segments.date DURING {date_range}
+        ORDER BY metrics.cost_micros DESC
+        LIMIT 100
+    """
+
+    keyword_response = ga_service.search(
+        customer_id=customer_id,
+        query=keyword_query
+    )
+
+    keyword_data = []
+
+    for row in keyword_response:
+
+        impressions = int(
+            row.metrics.impressions or 0
+        )
+
+        clicks = int(
+            row.metrics.clicks or 0
+        )
+
+        cost = float(
+            row.metrics.cost_micros or 0
+        ) / 1_000_000
+
+        conversions = float(
+            row.metrics.conversions or 0
+        )
+
+        ctr = (
+            (clicks / impressions) * 100
+            if impressions > 0
+            else 0
+        )
+
+        avg_cpc = (
+            cost / clicks
+            if clicks > 0
+            else 0
+        )
+
+        cpa = (
+            cost / conversions
+            if conversions > 0
+            else 0
+        )
+
+        if conversions >= 2:
+            status = "🟢 Winner"
+
+        elif cost > 500 and conversions == 0:
+            status = "🔴 Waste"
+
+        else:
+            status = "🟡 Monitor"
+
+        keyword_data.append({
+
+            "Keyword":
+                row.ad_group_criterion.keyword.text,
+
+            "Campaign":
+                row.campaign.name,
+
+            "Impressions":
+                impressions,
+
+            "Clicks":
+                clicks,
+
+            "Cost (₹)":
+                round(cost, 2),
+
+            "Conversions":
+                round(conversions, 2),
+
+            "CTR (%)":
+                round(ctr, 2),
+
+            "Avg CPC (₹)":
+                round(avg_cpc, 2),
+
+            "CPA (₹)":
+                round(cpa, 2)
+                if conversions > 0
+                else 0,
+
+            "Status":
+                status
+        })
+
+
+    if keyword_data:
+
+        keyword_df = pd.DataFrame(
+            keyword_data
+        )
+
+        st.dataframe(
+            keyword_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # ------------------------------------------
+        # TOP PERFORMING KEYWORDS
+        # ------------------------------------------
+
+        st.subheader(
+            "🏆 Top Performing Keywords"
+        )
+
+        winners_df = keyword_df[
+            keyword_df["Status"] == "🟢 Winner"
+        ].copy()
+
+        if not winners_df.empty:
+
+            winners_df = winners_df.sort_values(
+                "Conversions",
+                ascending=False
+            )
+
+            st.dataframe(
+                winners_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+
+            st.info(
+                "No winning keywords found yet."
+            )
+
+
+        # ------------------------------------------
+        # WASTE KEYWORDS
+        # ------------------------------------------
+
+        st.subheader(
+            "🚨 High Spend + Zero Conversion Keywords"
+        )
+
+        waste_keywords_df = keyword_df[
+            keyword_df["Status"] == "🔴 Waste"
+        ].copy()
+
+        if not waste_keywords_df.empty:
+
+            waste_keywords_df = (
+                waste_keywords_df
+                .sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
+            )
+
+            st.dataframe(
+                waste_keywords_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+
+            st.success(
+                "No major keyword waste found."
+            )
+
+
+    else:
+
+        st.info(
+            "No keyword data available for the selected date range."
+        )
+
+
+except Exception as e:
+
+    st.error(
+        f"Keyword Performance Error: {e}"
+    ) 
 st.divider()
 # ==================================================
 # ASK AI
