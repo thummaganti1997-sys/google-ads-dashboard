@@ -390,9 +390,9 @@ try:
         # ==================================================
         # CAMPAIGN CHARTS
         # ==================================================
-         except Exception as e:
+           
 
-        st.header("📈 Campaign Comparison")
+               st.header("📈 Campaign Comparison")
 
         chart_col1, chart_col2 = st.columns(2)
 
