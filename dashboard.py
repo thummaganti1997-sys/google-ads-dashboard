@@ -638,24 +638,22 @@ else:
 
 
 st.divider()
-
-
 # ==================================================
 # ASK AI
 # ==================================================
-  
-        st.header("🤖 Ask AI About Your Campaign")
 
-        question = st.text_input(
-            "Ask a question about your campaigns",
-            placeholder="Example: Why am I getting clicks but no conversions?"
-        )
+st.header("🤖 Ask AI About Your Campaign")
 
-        if st.button("Analyze with AI"):
+question = st.text_input(
+    "Ask a question about your campaigns",
+    placeholder="Example: Why am I getting clicks but no conversions?"
+)
 
-            if question:
+if st.button("Analyze with AI"):
 
-                prompt = f"""
+    if question:
+
+        prompt = f"""
 You are a professional Google Ads expert.
 
 Campaign data:
@@ -685,28 +683,24 @@ Give:
 Be practical and concise.
 """
 
-                with st.spinner("AI is analyzing..."):
+        with st.spinner("AI is analyzing..."):
 
-                    ai_response = (
-                        openai_client.responses.create(
-                            model="gpt-5.4-mini",
-                            input=prompt
-                        )
-                    )
+            ai_response = openai_client.responses.create(
+                model="gpt-5.4-mini",
+                input=prompt
+            )
 
-                st.subheader("🤖 AI Analysis")
+        st.subheader("🤖 AI Analysis")
 
-                st.write(
-                    ai_response.output_text
-                )
+        st.write(
+            ai_response.output_text
+        )
 
-            else:
+    else:
 
-                st.warning(
-                    "Please enter a question."
-                )
-
-
+        st.warning(
+            "Please enter a question."
+        )
 except Exception as e:
 
     st.error("Dashboard Error")
