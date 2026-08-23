@@ -965,7 +965,7 @@ else:
         # KEYWORD PERFORMANCE ANALYSIS
         # ==================================================
 
-        st.divider()
+        
         st.header("🔑 Keyword Performance Analysis")
 
         try:
