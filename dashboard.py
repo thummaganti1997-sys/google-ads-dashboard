@@ -1053,7 +1053,17 @@ else:
             )
 
         
-         
+     st.dataframe(
+        waste_keywords_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+except Exception as e:
+
+    st.error(
+        f"Keyword Performance Error: {e}"
+    )        
 
 except Exception as e:
 
