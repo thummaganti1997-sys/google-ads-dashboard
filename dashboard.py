@@ -634,7 +634,95 @@ else:
         "No search term data available."
     )
 
+# ==================================================
+# PERFORMANCE INSIGHTS
+# ==================================================
 
+st.divider()
+
+st.header("🏆 Performance Insights")
+
+if not filtered_df.empty:
+
+    insights_df = filtered_df.copy()
+
+    # Calculate CTR
+    insights_df["CTR (%)"] = (
+        insights_df["Clicks"]
+        / insights_df["Impressions"].replace(0, 1)
+        * 100
+    )
+
+    # Calculate CPA
+    insights_df["CPA (₹)"] = insights_df.apply(
+        lambda row:
+        row["Cost (₹)"] / row["Conversions"]
+        if row["Conversions"] > 0 else 0,
+        axis=1
+    )
+
+    best_campaign = insights_df.loc[
+        insights_df["Conversions"].idxmax()
+    ]
+
+    highest_spend = insights_df.loc[
+        insights_df["Cost (₹)"].idxmax()
+    ]
+
+    highest_ctr = insights_df.loc[
+        insights_df["CTR (%)"].idxmax()
+    ]
+
+    campaigns_with_conversions = insights_df[
+        insights_df["Conversions"] > 0
+    ]
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "🎯 Best Conversions",
+            best_campaign["Campaign"],
+            f'{best_campaign["Conversions"]:.0f} conversions'
+        )
+
+    with col2:
+        st.metric(
+            "💰 Highest Spend",
+            highest_spend["Campaign"],
+            f'₹{highest_spend["Cost (₹)"]:,.2f}'
+        )
+
+    with col3:
+        st.metric(
+            "📈 Highest CTR",
+            highest_ctr["Campaign"],
+            f'{highest_ctr["CTR (%)"]:.2f}%'
+        )
+
+    if not campaigns_with_conversions.empty:
+
+        best_cpa = campaigns_with_conversions.loc[
+            campaigns_with_conversions["CPA (₹)"].idxmin()
+        ]
+
+        st.success(
+            f'🏆 Best CPA Campaign: '
+            f'{best_cpa["Campaign"]} | '
+            f'CPA: ₹{best_cpa["CPA (₹)"]:,.2f}'
+        )
+
+    else:
+
+        st.info(
+            "No campaigns with conversions available for CPA analysis."
+        )
+
+else:
+
+    st.info(
+        "No campaign data available."
+    )
 st.divider()
 # ==================================================
 # ASK AI
