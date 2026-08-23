@@ -3,7 +3,10 @@ import pandas as pd
 from google.ads.googleads.client import GoogleAdsClient
 from openai import OpenAI
 
-st.set_page_config(page_title="Google Ads AI Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Google Ads AI Dashboard",
+    layout="wide"
+)
 
 st.title("🤖 Google Ads AI Dashboard")
 
@@ -22,7 +25,9 @@ date_range_map = {
 
 date_range = date_range_map[date_option]
 
+
 try:
+
     # ---------------- GOOGLE ADS CONNECTION ----------------
 
     credentials = {
@@ -36,7 +41,9 @@ try:
     customer_id = st.secrets["google_ads"]["customer_id"].replace("-", "")
 
     client = GoogleAdsClient.load_from_dict(credentials)
+
     ga_service = client.get_service("GoogleAdsService")
+
 
     # ---------------- CAMPAIGN QUERY ----------------
 
@@ -67,18 +74,23 @@ try:
             "Impressions": row.metrics.impressions,
             "Clicks": row.metrics.clicks,
             "Cost (₹)": round(
-                row.metrics.cost_micros / 1_000_000, 2
+                row.metrics.cost_micros / 1_000_000,
+                2
             ),
             "Conversions": round(
-                row.metrics.conversions, 2
+                row.metrics.conversions,
+                2
             )
         })
 
+
     st.success("Google Ads Connected Successfully! 🎉")
+
 
     if data:
 
         df = pd.DataFrame(data)
+
 
         # ---------------- SUMMARY METRICS ----------------
 
@@ -97,22 +109,48 @@ try:
             if total_conversions else 0
         )
 
+
         col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-        col1.metric("Impressions", f"{total_impressions:,}")
-        col2.metric("Clicks", f"{total_clicks:,}")
-        col3.metric("Cost", f"₹{total_cost:,.2f}")
-        col4.metric("Conversions", f"{total_conversions:.2f}")
-        col5.metric("CTR", f"{ctr:.2f}%")
-        col6.metric("CPA", f"₹{cpa:,.2f}")
+        col1.metric(
+            "Impressions",
+            f"{total_impressions:,}"
+        )
+
+        col2.metric(
+            "Clicks",
+            f"{total_clicks:,}"
+        )
+
+        col3.metric(
+            "Cost",
+            f"₹{total_cost:,.2f}"
+        )
+
+        col4.metric(
+            "Conversions",
+            f"{total_conversions:.2f}"
+        )
+
+        col5.metric(
+            "CTR",
+            f"{ctr:.2f}%"
+        )
+
+        col6.metric(
+            "CPA",
+            f"₹{cpa:,.2f}"
+        )
+
 
         st.divider()
 
+
         # ---------------- CAMPAIGN FILTER ----------------
 
-        campaigns = ["All Campaigns"] + list(
-            df["Campaign"].unique()
-        )
+        campaigns = [
+            "All Campaigns"
+        ] + list(df["Campaign"].unique())
 
         selected_campaign = st.selectbox(
             "🎯 Select Campaign",
@@ -126,6 +164,9 @@ try:
         else:
             filtered_df = df
 
+
+        # ---------------- CAMPAIGN TABLE ----------------
+
         st.subheader("📊 Campaign Performance")
 
         st.dataframe(
@@ -133,7 +174,9 @@ try:
             use_container_width=True
         )
 
+
         st.divider()
+
 
         # ---------------- DAILY DATA ----------------
 
@@ -162,12 +205,15 @@ try:
                 "Impressions": row.metrics.impressions,
                 "Clicks": row.metrics.clicks,
                 "Cost": round(
-                    row.metrics.cost_micros / 1_000_000, 2
+                    row.metrics.cost_micros / 1_000_000,
+                    2
                 ),
                 "Conversions": round(
-                    row.metrics.conversions, 2
+                    row.metrics.conversions,
+                    2
                 )
             })
+
 
         if daily_data:
 
@@ -182,18 +228,22 @@ try:
             chart1, chart2 = st.columns(2)
 
             with chart1:
+
                 st.write("Clicks per Day")
 
                 st.line_chart(
                     daily_df.set_index("Date")["Clicks"]
                 )
 
+
             with chart2:
+
                 st.write("Cost per Day")
 
                 st.line_chart(
                     daily_df.set_index("Date")["Cost"]
                 )
+
 
             st.write("Conversions per Day")
 
@@ -201,9 +251,11 @@ try:
                 daily_df.set_index("Date")["Conversions"]
             )
 
+
         st.divider()
 
-        # ---------------- AI CAMPAIGN ANALYSIS ----------------
+
+        # ---------------- ASK AI ABOUT CAMPAIGN ----------------
 
         st.header("🤖 Ask AI About Your Campaign")
 
@@ -232,6 +284,7 @@ Analyze the following Google Ads campaign data:
 {campaign_data}
 
 Overall metrics:
+
 Impressions: {total_impressions}
 Clicks: {total_clicks}
 Cost: ₹{total_cost:.2f}
@@ -240,9 +293,11 @@ CTR: {ctr:.2f}%
 CPA: ₹{cpa:.2f}
 
 User question:
+
 {question}
 
 Give a clear answer with:
+
 1. Performance analysis
 2. Possible reasons
 3. Specific recommendations
@@ -251,29 +306,45 @@ Give a clear answer with:
 Keep the answer practical and easy to understand.
 """
 
-                with st.spinner("AI is analyzing your campaigns..."):
+                with st.spinner(
+                    "AI is analyzing your campaigns..."
+                ):
 
-                    response = openai_client.responses.create(
+                    ai_response = openai_client.responses.create(
                         model="gpt-5.4-mini",
                         input=prompt
                     )
 
                     st.subheader("🤖 AI Analysis")
 
-                    st.write(response.output_text)
+                    st.write(
+                        ai_response.output_text
+                    )
 
-            
-# ---------------- CAMPAIGN-WISE AI RECOMMENDATIONS ----------------                  
+            else:
+
+                st.warning(
+                    "Please enter a question."
+                )
+
 
         st.divider()
-        st.header("🤖 Campaign-wise AI Recommendations")
 
-       selected_ai_campaign = st.selectbox(
-    "Select a campaign for AI recommendation",
-    df["Campaign"].unique()
-)
 
-if st.button("Get AI Recommendation"):
+        # ---------------- CAMPAIGN-WISE AI RECOMMENDATIONS ----------------
+
+        st.header(
+            "🤖 Campaign-wise AI Recommendations"
+        )
+
+        selected_ai_campaign = st.selectbox(
+            "Select a campaign for AI recommendation",
+            df["Campaign"].unique()
+        )
+
+
+        if st.button("Get AI Recommendation"):
+
             campaign_row = df[
                 df["Campaign"] == selected_ai_campaign
             ]
@@ -307,26 +378,35 @@ Give practical recommendations in this format:
 Keep the answer practical, clear and easy to understand.
 """
 
-            with st.spinner("AI is generating recommendations..."):
+            with st.spinner(
+                "AI is generating recommendations..."
+            ):
 
-                recommendation_response = openai_client.responses.create(
-                    model="gpt-5.4-mini",
-                    input=recommendation_prompt
+                recommendation_response = (
+                    openai_client.responses.create(
+                        model="gpt-5.4-mini",
+                        input=recommendation_prompt
+                    )
                 )
 
-                st.subheader("🤖 AI Recommendation")
+                st.subheader(
+                    "🤖 AI Recommendation"
+                )
 
                 st.write(
                     recommendation_response.output_text
                 )
 
 
-
     else:
+
         st.info(
             f"No campaign data found for {date_option}."
         )
 
+
 except Exception as e:
+
     st.error("Dashboard error")
+
     st.exception(e)
