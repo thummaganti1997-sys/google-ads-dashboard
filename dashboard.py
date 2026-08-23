@@ -1022,11 +1022,7 @@ else:
         )
 
 
-else:
 
-    st.info(
-        "No keyword data available for recommendations."
-    )
 
         # ------------------------------------------
         # WASTE KEYWORDS
