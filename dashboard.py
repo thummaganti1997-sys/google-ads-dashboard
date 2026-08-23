@@ -1052,18 +1052,17 @@ else:
                 hide_index=True
             )
 
-        else:
+        
+ else:
+    st.success(
+        "No major keyword waste found."
+    )
 
-            st.success(
-                "No major keyword waste found."
-            )
+except Exception as e:
 
-
-    else:
-
-        st.info(
-            "No keyword data available for the selected date range."
-        )
+    st.error(
+        f"Keyword Performance Error: {e}"
+    )
 
 
 except Exception as e:
