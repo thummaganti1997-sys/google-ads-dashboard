@@ -1032,7 +1032,6 @@ else:
     keyword_df["Status"] == "🔴 Waste"
 
 
-if not waste_keywords_df.empty:
 
     waste_keywords_df = waste_keywords_df.sort_values(
         "Cost (₹)",
