@@ -376,35 +376,7 @@ try:
         st.divider()
          
 
-# ==================================================
-# TOP CAMPAIGN RANKING
-# ==================================================
 
-st.divider()
-
-st.header("🏆 Top Campaign Ranking")
-
-ranking_df = df.copy()
-
-ranking_df["Performance Score"] = (
-    ranking_df["CTR %"] * 2
-    + ranking_df["Conversion Rate %"] * 10
-)
-
-ranking_df = ranking_df.sort_values(
-    by="Performance Score",
-    ascending=False
-)
-
-ranking_df["Rank"] = range(1, len(ranking_df) + 1)
-
-st.dataframe(
-    ranking_df,
-    use_container_width=True,
-    hide_index=True
-)
-
-st.divider()
         st.header("📊 Campaign Performance")
 
         st.dataframe(
