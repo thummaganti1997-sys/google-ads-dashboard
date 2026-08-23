@@ -1078,17 +1078,17 @@ try:
             keyword_data
         )
 
-        st.dataframe(
-            keyword_df,
-            use_container_width=True,
-            hide_index=True
-        )
-        
+       st.dataframe(
+    keyword_df,
+    use_container_width=True,
+    hide_index=True
+)
+
 except Exception as e:
 
     st.error(
         f"Keyword Performance Error: {e}"
-    )
+    ) 
 
         # ------------------------------------------
         # TOP PERFORMING KEYWORDS
