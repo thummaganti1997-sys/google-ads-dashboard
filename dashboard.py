@@ -50,12 +50,30 @@ try:
             "Cost (₹)": round(row.metrics.cost_micros / 1_000_000, 2),
             "Conversions": round(row.metrics.conversions, 2),
         })
+if data:
+    total_impressions = sum(item["Impressions"] for item in data)
+    total_clicks = sum(item["Clicks"] for item in data)
+    total_cost = sum(item["Cost (₹)"] for item in data)
+    total_conversions = sum(item["Conversions"] for item in data)
 
-    if data:
-        st.dataframe(data, use_container_width=True)
-    else:
-        st.info("No campaign data found for the last 30 days.")
+    ctr = (total_clicks / total_impressions * 100) if total_impressions else 0
+    cpa = (total_cost / total_conversions) if total_conversions else 0
 
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+    col1.metric("Impressions", f"{total_impressions:,}")
+    col2.metric("Clicks", f"{total_clicks:,}")
+    col3.metric("Cost", f"₹{total_cost:,.2f}")
+    col4.metric("Conversions", f"{total_conversions:,.2f}")
+    col5.metric("CTR", f"{ctr:.2f}%")
+    col6.metric("CPA", f"₹{cpa:.2f}")
+
+    st.divider()
+    st.subheader("Campaign Performance")
+    st.dataframe(data, use_container_width=True)
+
+else:
+    st.info("No campaign data found for the last 30 days.")
 except Exception as e:
     st.error("Google Ads connection error")
     st.exception(e)
