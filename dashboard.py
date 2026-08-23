@@ -334,143 +334,7 @@ try:
         # DAILY PERFORMANCE
         # ==================================================
 
-        st.header("📅 Daily Performance")
-
-        daily_query = f"""
-            SELECT
-                segments.date,
-                metrics.impressions,
-                metrics.clicks,
-                metrics.cost_micros,
-                metrics.conversions
-            FROM customer
-            WHERE segments.date DURING {date_range}
-            ORDER BY segments.date
-        """
-
-        daily_response = ga_service.search(
-            customer_id=customer_id,
-            query=daily_query
-        )
-
-        daily_data = []
-
-        for row in daily_response:
-
-            impressions = row.metrics.impressions
-            clicks = row.metrics.clicks
-            cost = row.metrics.cost_micros / 1_000_000
-            conversions = row.metrics.conversions
-
-            daily_ctr = (
-                clicks / impressions * 100
-                if impressions else 0
-            )
-
-            daily_cpc = (
-                cost / clicks
-                if clicks else 0
-            )
-
-            daily_cpa = (
-                cost / conversions
-                if conversions else 0
-            )
-
-            daily_data.append({
-                "Date": str(row.segments.date),
-                "Impressions": impressions,
-                "Clicks": clicks,
-                "Cost": round(cost, 2),
-                "Conversions": round(conversions, 2),
-                "CTR": round(daily_ctr, 2),
-                "CPC": round(daily_cpc, 2),
-                "CPA": round(daily_cpa, 2)
-            })
-
-
-        if daily_data:
-
-            daily_df = pd.DataFrame(daily_data)
-
-            daily_df["Date"] = pd.to_datetime(
-                daily_df["Date"]
-            )
-
-            daily_df = daily_df.set_index("Date")
-
-
-            daily_col1, daily_col2 = st.columns(2)
-
-            with daily_col1:
-
-                st.subheader("Clicks per Day")
-
-                st.line_chart(
-                    daily_df["Clicks"]
-                )
-
-            with daily_col2:
-
-                st.subheader("Cost per Day")
-
-                st.line_chart(
-                    daily_df["Cost"]
-                )
-
-
-            daily_col3, daily_col4 = st.columns(2)
-
-            with daily_col3:
-
-                st.subheader("CTR per Day")
-
-                st.line_chart(
-                    daily_df["CTR"]
-                )
-
-            with daily_col4:
-
-                st.subheader("CPC per Day")
-
-                st.line_chart(
-                    daily_df["CPC"]
-                )
-
-
-            daily_col5, daily_col6 = st.columns(2)
-
-            with daily_col5:
-
-                st.subheader("Conversions per Day")
-
-                st.line_chart(
-                    daily_df["Conversions"]
-                )
-
-            with daily_col6:
-
-                st.subheader("CPA per Day")
-
-                st.line_chart(
-                    daily_df["CPA"]
-                )
-
-
-            st.subheader("Daily Performance Table")
-
-            st.dataframe(
-                daily_df.reset_index(),
-                use_container_width=True
-            )
-
-        else:
-
-            st.warning(
-                "Daily performance data is not available."
-            )
-
-        st.divider()
+       
 
 
         # ==================================================
@@ -496,7 +360,157 @@ try:
         search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
+        )# ==================================================
+# DAILY PERFORMANCE
+# ==================================================
+
+st.divider()
+st.header("📅 Daily Performance")
+
+try:
+
+    daily_query = f"""
+        SELECT
+            segments.date,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.cost_micros,
+            metrics.conversions
+        FROM customer
+        WHERE segments.date DURING {date_range}
+        ORDER BY segments.date
+    """
+
+    daily_response = ga_service.search(
+        customer_id=customer_id,
+        query=daily_query
+    )
+
+    daily_data = []
+
+    for row in daily_response:
+
+        impressions = int(row.metrics.impressions or 0)
+        clicks = int(row.metrics.clicks or 0)
+        cost = float(row.metrics.cost_micros or 0) / 1_000_000
+        conversions = float(row.metrics.conversions or 0)
+
+        ctr = (clicks / impressions * 100) if impressions > 0 else 0
+        cpc = (cost / clicks) if clicks > 0 else 0
+        cpa = (cost / conversions) if conversions > 0 else 0
+
+        daily_data.append({
+            "Date": str(row.segments.date),
+            "Impressions": impressions,
+            "Clicks": clicks,
+            "Cost": round(cost, 2),
+            "Conversions": round(conversions, 2),
+            "CTR": round(ctr, 2),
+            "CPC": round(cpc, 2),
+            "CPA": round(cpa, 2)
+        })
+
+    if daily_data:
+
+        daily_df = pd.DataFrame(daily_data)
+
+        # Convert date correctly
+        daily_df["Date"] = pd.to_datetime(
+            daily_df["Date"],
+            errors="coerce"
         )
+
+        # Remove invalid dates
+        daily_df = daily_df.dropna(subset=["Date"])
+
+        # Sort dates correctly
+        daily_df = daily_df.sort_values("Date")
+
+        # Set Date as index
+        daily_df = daily_df.set_index("Date")
+
+        # --------------------------
+        # ROW 1
+        # --------------------------
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Clicks per Day")
+            st.line_chart(
+                daily_df["Clicks"],
+                use_container_width=True
+            )
+
+        with col2:
+            st.subheader("Cost per Day")
+            st.line_chart(
+                daily_df["Cost"],
+                use_container_width=True
+            )
+
+        # --------------------------
+        # ROW 2
+        # --------------------------
+
+        col3, col4 = st.columns(2)
+
+        with col3:
+            st.subheader("CTR per Day")
+            st.line_chart(
+                daily_df["CTR"],
+                use_container_width=True
+            )
+
+        with col4:
+            st.subheader("CPC per Day")
+            st.line_chart(
+                daily_df["CPC"],
+                use_container_width=True
+            )
+
+        # --------------------------
+        # ROW 3
+        # --------------------------
+
+        col5, col6 = st.columns(2)
+
+        with col5:
+            st.subheader("Conversions per Day")
+            st.line_chart(
+                daily_df["Conversions"],
+                use_container_width=True
+            )
+
+        with col6:
+            st.subheader("CPA per Day")
+            st.line_chart(
+                daily_df["CPA"],
+                use_container_width=True
+            )
+
+        # --------------------------
+        # TABLE
+        # --------------------------
+
+        st.subheader("Daily Performance Table")
+
+        st.dataframe(
+            daily_df.reset_index(),
+            use_container_width=True
+        )
+
+    else:
+
+        st.warning(
+            "No daily performance data available for the selected date range."
+        )
+
+except Exception as e:
+
+    st.error(
+        f"Daily Performance Error: {e}"
+    )
 
         search_data = []
 
