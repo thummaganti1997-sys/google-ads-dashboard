@@ -216,7 +216,55 @@ try:
 
         st.divider()
 
+        # ==================================================
+        # AI PERFORMANCE ALERTS
+        # ==================================================
 
+        st.header("🔔 Performance Alerts")
+
+        alerts = []
+
+        if total_conversions == 0 and total_cost > 0:
+            alerts.append(
+                f"🔴 You spent ₹{total_cost:,.2f} but recorded 0 conversions. Check conversion tracking and lead quality."
+            )
+
+        if overall_ctr < 3:
+            alerts.append(
+                f"🟡 CTR is low at {overall_ctr:.2f}%. Review ads and keywords."
+            )
+
+        elif overall_ctr >= 8:
+            alerts.append(
+                f"🟢 CTR is strong at {overall_ctr:.2f}%."
+            )
+
+        if overall_cpc > 50:
+            alerts.append(
+                f"🟡 Average CPC is ₹{overall_cpc:.2f}. Review expensive keywords and search terms."
+            )
+
+        waste_campaigns = df[
+            (df["Cost (₹)"] > 0) &
+            (df["Conversions"] == 0)
+        ]
+
+        if not waste_campaigns.empty:
+            alerts.append(
+                f"🔴 {len(waste_campaigns)} campaign(s) have spend but 0 conversions."
+            )
+
+        for alert in alerts:
+            if "🔴" in alert:
+                st.error(alert)
+
+            elif "🟡" in alert:
+                st.warning(alert)
+
+            else:
+                st.success(alert)
+
+        st.divider()
         # ==================================================
         # CAMPAIGN FILTER
         # ==================================================
