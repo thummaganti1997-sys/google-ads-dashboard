@@ -512,102 +512,12 @@ except Exception as e:
     st.error(
         f"Daily Performance Error: {e}"
     )
-
-        # SEARCH TERMS ANALYSIS
-st.header("🔍 Search Terms Analysis")
-
-try:
-
-    search_query = f"""
-        SELECT
-            search_term_view.search_term,
-            campaign.name,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.cost_micros,
-            metrics.conversions
-        FROM search_term_view
-        WHERE segments.date DURING {date_range}
-        ORDER BY metrics.cost_micros DESC
-    """
-
-    search_response = ga_service.search(
-        customer_id=customer_id,
-        query=search_query
-    )
-
-    search_data = []
-
-    for row in search_response:
-
-        search_data.append({
-            "Search Term": row.search_term_view.search_term,
-            "Campaign": row.campaign.name,
-            "Impressions": row.metrics.impressions,
-            "Clicks": row.metrics.clicks,
-            "Cost (₹)": round(
-                row.metrics.cost_micros / 1_000_000,
-                2
-            ),
-            "Conversions": round(
-                row.metrics.conversions,
-                2
-            )
-        })
-
-    if search_data:
-
-        search_df = pd.DataFrame(search_data)
-
-        st.dataframe(
-            search_df,
-            use_container_width=True
-        )
-
-    else:
-        st.info("No search term data available.")
-
-except Exception as e:
-    st.error(f"Search Terms Error: {e}")
-
-        for row in search_response:
-
-            search_data.append({
-                "Search Term": row.search_term_view.search_term,
-                "Campaign": row.campaign.name,
-                "Impressions": row.metrics.impressions,
-                "Clicks": row.metrics.clicks,
-                "Cost (₹)": round(
-                    row.metrics.cost_micros / 1_000_000,
-                    2
-                ),
-                "Conversions": round(
-                    row.metrics.conversions,
-                    2
-                )
-            })
-
-
-        if search_data:
-
-            search_df = pd.DataFrame(search_data)
-
-            st.dataframe(
-                search_df,
-                use_container_width=True
-            )
-
-        else:
-
-            search_df = pd.DataFrame()
-
-            st.info(
-                
 # ==================================================
 # SEARCH TERMS ANALYSIS
 # ==================================================
 
 st.divider()
+
 st.header("🔍 Search Terms Analysis")
 
 try:
@@ -648,25 +558,17 @@ try:
         )
 
         search_data.append({
-            "Search Term": (
-                row.search_term_view.search_term
-            ),
+            "Search Term": row.search_term_view.search_term,
             "Campaign": row.campaign.name,
             "Impressions": impressions,
             "Clicks": clicks,
             "Cost (₹)": round(cost, 2),
-            "Conversions": round(
-                conversions,
-                2
-            )
+            "Conversions": round(conversions, 2)
         })
-
 
     if search_data:
 
-        search_df = pd.DataFrame(
-            search_data
-        )
+        search_df = pd.DataFrame(search_data)
 
         st.dataframe(
             search_df,
@@ -681,7 +583,6 @@ try:
             "No search terms found for the selected date range."
         )
 
-
 except Exception as e:
 
     search_df = pd.DataFrame()
@@ -689,49 +590,60 @@ except Exception as e:
     st.error(
         f"Search Terms Error: {e}"
     )
-        if not search_df.empty:
-
-            waste_df = search_df[
-                (search_df["Cost (₹)"] > 0)
-                &
-                (search_df["Conversions"] == 0)
-            ].copy()
-
-            if not waste_df.empty:
-
-                waste_df = waste_df.sort_values(
-                    "Cost (₹)",
-                    ascending=False
-                )
-
-                st.warning(
-                    "These search terms have spend but 0 conversions."
-                )
-
-                st.dataframe(
-                    waste_df,
-                    use_container_width=True
-                )
-
-            else:
-
-                st.success(
-                    "No major waste spend found."
-                )
-
-        else:
-
-            st.info(
-                "No search term data available."
-            )
-
-        st.divider()
 
 
-        # ==================================================
-        # ASK AI
-        # ==================================================
+# ==================================================
+# POTENTIAL WASTE SPEND
+# ==================================================
 
+st.divider()
+
+st.header("💸 Potential Waste Spend")
+
+if not search_df.empty:
+
+    waste_df = search_df[
+        (search_df["Cost (₹)"] > 0)
+        &
+        (search_df["Conversions"] == 0)
+    ].copy()
+
+    if not waste_df.empty:
+
+        waste_df = waste_df.sort_values(
+            "Cost (₹)",
+            ascending=False
+        )
+
+        st.warning(
+            "These search terms have spend but 0 conversions."
+        )
+
+        st.dataframe(
+            waste_df,
+            use_container_width=True
+        )
+
+    else:
+
+        st.success(
+            "No major waste spend found."
+        )
+
+else:
+
+    st.info(
+        "No search term data available."
+    )
+
+
+st.divider()
+
+
+# ==================================================
+# ASK AI
+# ==================================================
+  
         st.header("🤖 Ask AI About Your Campaign")
 
         question = st.text_input(
