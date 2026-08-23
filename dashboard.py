@@ -272,9 +272,7 @@ Keep the answer practical and easy to understand.
         selected_ai_campaign = st.selectbox(
             "Select a campaign for AI recommendation",
             df["Campaign"].unique()
-        )
-
-        if st.button("Get AI Recommendation"):
+        )        if st.button("Get AI Recommendation"):
 
             campaign_row = df[
                 df["Campaign"] == selected_ai_campaign
@@ -288,34 +286,41 @@ Keep the answer practical and easy to understand.
                 api_key=st.secrets["openai"]["api_key"]
             )
 
-            prompt = f"""
+            recommendation_prompt = f"""
 You are a professional Google Ads expert.
 
-Analyze this campaign:
+Analyze this specific Google Ads campaign:
 
 {campaign_data}
 
-Give:
-1. Performance summary
-2. Problems found
-3. What to improve
-4. Budget recommendations
-5. Keyword recommendations
-6. Conversion improvement suggestions
-7. Clear action plan
+Give practical recommendations in this format:
 
-Keep the answer simple and practical.
+1. Campaign performance summary
+2. Main problems
+3. What is working well
+4. Keyword recommendations
+5. Budget recommendations
+6. Bidding recommendations
+7. Conversion improvement suggestions
+8. Top 3 actions to take immediately
+
+Keep the answer practical, clear and easy to understand.
 """
 
-            with st.spinner("AI is analyzing this campaign..."):
+            with st.spinner("AI is generating recommendations..."):
 
-                response = openai_client.responses.create(
+                recommendation_response = openai_client.responses.create(
                     model="gpt-5.4-mini",
-                    input=prompt
+                    input=recommendation_prompt
                 )
 
-                st.subheader("📊 AI Recommendation")
-                st.write(response.output_text) 
+                st.subheader("🤖 AI Recommendation")
+
+                st.write(
+                    recommendation_response.output_text
+                )
+
+
 
     else:
         st.info(
