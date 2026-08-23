@@ -1032,45 +1032,32 @@ else:
             "🚨 High Spend + Zero Conversion Keywords"
         )
 
-        waste_keywords_df = keyword_df[
-            keyword_df["Status"] == "🔴 Waste"
-        ].copy()
+       # ==========================================
+# HIGH SPEND + ZERO CONVERSION KEYWORDS
+# ==========================================
 
-        if not waste_keywords_df.empty:
+st.subheader("🚨 High Spend + Zero Conversion Keywords")
 
-            waste_keywords_df = (
-                waste_keywords_df
-                .sort_values(
-                    "Cost (₹)",
-                    ascending=False
-                )
-            )
+waste_keywords_df = keyword_df[
+    keyword_df["Status"] == "🔴 Waste"
+].copy()
 
-            st.dataframe(
-                waste_keywords_df,
-                use_container_width=True,
-                hide_index=True
-            )
+if not waste_keywords_df.empty:
 
-        
-     st.dataframe(
+    waste_keywords_df = waste_keywords_df.sort_values(
+        "Cost (₹)",
+        ascending=False
+    )
+
+    st.dataframe(
         waste_keywords_df,
         use_container_width=True,
         hide_index=True
     )
 
-except Exception as e:
+else:
 
-    st.error(
-        f"Keyword Performance Error: {e}"
-    )        
-
-except Exception as e:
-
-    st.error(
-        f"Keyword Performance Error: {e}"
-    )
-
+    st.success("No major keyword waste found.") 
 
 except Exception as e:
 
