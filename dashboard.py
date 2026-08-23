@@ -1104,37 +1104,7 @@ except Exception as e:
         f"Keyword Performance Error: {e}"
     ) 
        
-                # ------------------------------------------
-                # TOP PERFORMING KEYWORDS
-                # ------------------------------------------
-
-                
-                    "🏆 Top Performing Keywords"
-                )
-
-                winners_df = keyword_df[
-                    keyword_df["Status"] == "🟢 Winner"
-                ].copy()
-
-                if not winners_df.empty:
-
-                    winners_df = winners_df.sort_values(
-                        "Conversions",
-                        ascending=False
-                    )
-
-                    st.dataframe(
-                        winners_df,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-                else:
-
-                    st.info(
-                        "No winning keywords found yet."
-                    )
-
+               
 
                 # ------------------------------------------
                 # HIGH SPEND + ZERO CONVERSION
