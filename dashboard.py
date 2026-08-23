@@ -281,13 +281,12 @@ try:
         if selected_campaign == "All Campaigns":
 
             filtered_df = df.copy()
-
         else:
-
-            filtered_df = df[        # ==================================================
+            filtered_df = df
+     
+             # ==================================================
         # CAMPAIGN PERFORMANCE SCORE
         # ==================================================
-
         selected_impressions = filtered_df["Impressions"].sum()
         selected_clicks = filtered_df["Clicks"].sum()
         selected_cost = filtered_df["Cost (₹)"].sum()
