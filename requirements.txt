@@ -1,4 +1,5 @@
-Flask
+streamlit
+pandas
 google-ads
 google-auth-oauthlib
 openai
