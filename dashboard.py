@@ -961,140 +961,194 @@ else:
     st.info(
         "No campaign data available for budget optimization."
     )
-   # ==================================================
-# KEYWORD PERFORMANCE ANALYSIS
-# ==================================================
+          # ==================================================
+        # KEYWORD PERFORMANCE ANALYSIS
+        # ==================================================
 
-st.divider()
-st.header("🔑 Keyword Performance Analysis")
+        st.divider()
+        st.header("🔑 Keyword Performance Analysis")
 
-try:
+        try:
 
-    keyword_query = f"""
-        SELECT
-            ad_group_criterion.keyword.text,
-            campaign.name,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.cost_micros,
-            metrics.conversions
-        FROM keyword_view
-        WHERE segments.date DURING {date_range}
-        ORDER BY metrics.cost_micros DESC
-        LIMIT 100
-    """
+            keyword_query = f"""
+                SELECT
+                    ad_group_criterion.keyword.text,
+                    campaign.name,
+                    metrics.impressions,
+                    metrics.clicks,
+                    metrics.cost_micros,
+                    metrics.conversions
+                FROM keyword_view
+                WHERE segments.date DURING {date_range}
+                AND ad_group_criterion.status != REMOVED
+                ORDER BY metrics.cost_micros DESC
+            """
 
-    keyword_response = ga_service.search(
-        customer_id=customer_id,
-        query=keyword_query
-    )
+            keyword_response = ga_service.search(
+                customer_id=customer_id,
+                query=keyword_query
+            )
 
-    keyword_data = []
+            keyword_data = []
 
-    for row in keyword_response:
+            for row in keyword_response:
 
-        impressions = int(
-            row.metrics.impressions or 0
-        )
+                impressions = row.metrics.impressions
+                clicks = row.metrics.clicks
+                cost = row.metrics.cost_micros / 1_000_000
+                conversions = row.metrics.conversions
 
-        clicks = int(
-            row.metrics.clicks or 0
-        )
+                ctr = (
+                    clicks / impressions * 100
+                    if impressions else 0
+                )
 
-        cost = float(
-            row.metrics.cost_micros or 0
-        ) / 1_000_000
+                avg_cpc = (
+                    cost / clicks
+                    if clicks else 0
+                )
 
-        conversions = float(
-            row.metrics.conversions or 0
-        )
+                cpa = (
+                    cost / conversions
+                    if conversions else 0
+                )
 
-        ctr = (
-            (clicks / impressions) * 100
-            if impressions > 0
-            else 0
-        )
+                if conversions >= 2:
 
-        avg_cpc = (
-            cost / clicks
-            if clicks > 0
-            else 0
-        )
+                    status = "🟢 Winner"
 
-        cpa = (
-            cost / conversions
-            if conversions > 0
-            else 0
-        )
+                elif conversions > 0:
 
-        if conversions >= 2:
-            status = "🟢 Winner"
+                    status = "🟡 Monitor"
 
-        elif cost > 500 and conversions == 0:
-            status = "🔴 Waste"
+                elif cost >= 500:
 
-        else:
-            status = "🟡 Monitor"
+                    status = "🔴 Waste"
 
-        keyword_data.append({
+                else:
 
-            "Keyword":
-                row.ad_group_criterion.keyword.text,
+                    status = "🟡 Monitor"
 
-            "Campaign":
-                row.campaign.name,
+                keyword_data.append({
 
-            "Impressions":
-                impressions,
+                    "Keyword": row.ad_group_criterion.keyword.text,
 
-            "Clicks":
-                clicks,
+                    "Campaign": row.campaign.name,
 
-            "Cost (₹)":
-                round(cost, 2),
+                    "Impressions": impressions,
 
-            "Conversions":
-                round(conversions, 2),
+                    "Clicks": clicks,
 
-            "CTR (%)":
-                round(ctr, 2),
+                    "Cost (₹)": round(cost, 2),
 
-            "Avg CPC (₹)":
-                round(avg_cpc, 2),
+                    "Conversions": round(conversions, 2),
 
-            "CPA (₹)":
-                round(cpa, 2)
-                if conversions > 0
-                else 0,
+                    "CTR (%)": round(ctr, 2),
 
-            "Status":
-                status
-        })
+                    "Avg CPC (₹)": round(avg_cpc, 2),
+
+                    "CPA (₹)": round(cpa, 2),
+
+                    "Status": status
+
+                })
 
 
-try:
+            if keyword_data:
 
-    if keyword_data:
+                keyword_df = pd.DataFrame(
+                    keyword_data
+                )
 
-        keyword_df = pd.DataFrame(keyword_data)
+                st.dataframe(
+                    keyword_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
 
-        st.dataframe(
-            keyword_df,
-            use_container_width=True,
-            hide_index=True
-        )
 
-    else:
+                # ------------------------------------------
+                # TOP PERFORMING KEYWORDS
+                # ------------------------------------------
 
-        st.info("No keyword data available.")
+                st.subheader(
+                    "🏆 Top Performing Keywords"
+                )
 
-except Exception as e:
+                winners_df = keyword_df[
+                    keyword_df["Status"] == "🟢 Winner"
+                ].copy()
 
-    st.error(
-        f"Keyword Performance Error: {e}"
-    )
+                if not winners_df.empty:
 
-    
+                    winners_df = winners_df.sort_values(
+                        "Conversions",
+                        ascending=False
+                    )
+
+                    st.dataframe(
+                        winners_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                else:
+
+                    st.info(
+                        "No winning keywords found yet."
+                    )
+
+
+                # ------------------------------------------
+                # HIGH SPEND + ZERO CONVERSION
+                # ------------------------------------------
+
+                st.subheader(
+                    "🚨 High Spend + Zero Conversion Keywords"
+                )
+
+                waste_keywords_df = keyword_df[
+                    (
+                        keyword_df["Conversions"] == 0
+                    )
+                    &
+                    (
+                        keyword_df["Cost (₹)"] > 0
+                    )
+                ].copy()
+
+                if not waste_keywords_df.empty:
+
+                    waste_keywords_df = waste_keywords_df.sort_values(
+                        "Cost (₹)",
+                        ascending=False
+                    )
+
+                    st.dataframe(
+                        waste_keywords_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                else:
+
+                    st.success(
+                        "No waste keywords found."
+                    )
+
+
+            else:
+
+                st.info(
+                    "No keyword data available for the selected date range."
+                )
+
+
+        except Exception as e:
+
+            st.error(
+                f"Keyword Performance Error: {e}"
+            )
         # ------------------------------------------
         # TOP PERFORMING KEYWORDS
         # ------------------------------------------
