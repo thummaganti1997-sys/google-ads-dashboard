@@ -1033,7 +1033,7 @@ else:
 
 st.subheader("🚨 High Spend + Zero Conversion Keywords")
 
-waste_keywords_df = keyword_df[
+
     keyword_df["Status"] == "🔴 Waste"
 ].copy()
 
