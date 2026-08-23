@@ -406,21 +406,17 @@ st.header("📈 Campaign Comparison")
 
       
 
-            st.subheader("Conversions by Campaign")
-
-            conversion_chart = filtered_df[
-                ["Campaign", "Conversions"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                conversion_chart,
-                use_container_width=True
-            )
+          
 # ==================================================
 # CAMPAIGN CHARTS
 # ==================================================
 
-st.header("📈 Campaign Comparison")
+
+    with chart_col2:
+
+        st.subheader("Cost by Campaign")
+
+        cost_chart = st.header("📈 Campaign Comparison")
 
 if not filtered_df.empty:
 
@@ -443,7 +439,6 @@ if not filtered_df.empty:
             use_container_width=True
         )
 
-
         st.subheader("Conversions by Campaign")
 
         conversion_chart = filtered_df[
@@ -455,16 +450,9 @@ if not filtered_df.empty:
             use_container_width=True
         )
 
-
     # ==============================================
     # RIGHT COLUMN
-    # ==============================================
-
-    with chart_col2:
-
-        st.subheader("Cost by Campaign")
-
-        cost_chart = filtered_df[
+    # ==============================================filtered_df[
             ["Campaign", "Cost (₹)"]
         ].set_index("Campaign")
 
