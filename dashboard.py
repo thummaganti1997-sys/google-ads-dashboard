@@ -385,58 +385,65 @@ try:
         ) 
         
         st.divider()
+except Exception as e:
+    st.error(f"Error: {e}")
+    
+  # ==================================================
+# CAMPAIGN CHARTS
+# ==================================================
+except Exception as e:
+    st.error(f"Error: {e}")
 
-        # ==================================================
-        # CAMPAIGN CHARTS
-        # ==================================================
+# CAMPAIGN CHARTS
 
 st.header("📈 Campaign Comparison")
 
-try:
+if not filtered_df.empty:
+st.header("📈 Campaign Comparison")
 
-    if not filtered_df.empty:
+if not filtered_df.empty:
 
-        chart_col1, chart_col2 = st.columns(2)
+    chart_col1, chart_col2 = st.columns(2)
 
-        # ------------------------------------------
-        # CLICKS BY CAMPAIGN
-        # ------------------------------------------
+    with chart_col1:
+        st.subheader("Clicks by Campaign")
 
-        with chart_col1:
+        click_chart = filtered_df[
+            ["Campaign", "Clicks"]
+        ].set_index("Campaign")
 
-            st.subheader("Clicks by Campaign")
+        st.bar_chart(
+            click_chart,
+            use_container_width=True
+        )
 
-            click_chart = filtered_df[
-                ["Campaign", "Clicks"]
-            ].set_index("Campaign")
+        st.subheader("Conversions by Campaign")
 
-            st.bar_chart(
-                click_chart,
-                use_container_width=True
-            )
+        conversion_chart = filtered_df[
+            ["Campaign", "Conversions"]
+        ].set_index("Campaign")
 
+        st.bar_chart(
+            conversion_chart,
+            use_container_width=True
+        )
 
-        # ------------------------------------------
-        # COST BY CAMPAIGN
-        # ------------------------------------------
+    with chart_col2:
+        st.subheader("Cost by Campaign")
 
-        with chart_col2:
+        cost_chart = filtered_df[
+            ["Campaign", "Cost (₹)"]
+        ].set_index("Campaign")
 
-            st.subheader("Cost by Campaign")
+        st.bar_chart(
+            cost_chart,
+            use_container_width=True
+        )
 
-            cost_chart = filtered_df[
-                ["Campaign", "Cost (₹)"]
-            ].set_index("Campaign")
+else:
+    st.warning("Campaign data is not available.")
 
-            st.bar_chart(
-                cost_chart,
-                use_container_width=True
-            )
-
-
-        chart_col3, chart_col4 = st.columns(2)
-
-
+st.divider()
         # ------------------------------------------
         # CONVERSIONS BY CAMPAIGN
         # ------------------------------------------
