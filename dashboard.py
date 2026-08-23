@@ -264,6 +264,58 @@ Keep the answer practical and easy to understand.
 
             else:
                 st.warning("Please enter a question.")
+                       # ---------------- CAMPAIGN-WISE AI RECOMMENDATIONS ----------------
+
+        st.divider()
+        st.header("🤖 Campaign-wise AI Recommendations")
+
+        selected_ai_campaign = st.selectbox(
+            "Select a campaign for AI recommendation",
+            df["Campaign"].unique()
+        )
+
+        if st.button("Get AI Recommendation"):
+
+            campaign_row = df[
+                df["Campaign"] == selected_ai_campaign
+            ]
+
+            campaign_data = campaign_row.to_string(
+                index=False
+            )
+
+            openai_client = OpenAI(
+                api_key=st.secrets["openai"]["api_key"]
+            )
+
+            prompt = f"""
+You are a professional Google Ads expert.
+
+Analyze this campaign:
+
+{campaign_data}
+
+Give:
+1. Performance summary
+2. Problems found
+3. What to improve
+4. Budget recommendations
+5. Keyword recommendations
+6. Conversion improvement suggestions
+7. Clear action plan
+
+Keep the answer simple and practical.
+"""
+
+            with st.spinner("AI is analyzing this campaign..."):
+
+                response = openai_client.responses.create(
+                    model="gpt-5.4-mini",
+                    input=prompt
+                )
+
+                st.subheader("📊 AI Recommendation")
+                st.write(response.output_text) 
 
     else:
         st.info(
