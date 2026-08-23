@@ -696,7 +696,7 @@ Be practical and concise.
             ai_response.output_text
         )
 
-      else:
+    else:
 
         st.warning(
             "Please enter a question."
