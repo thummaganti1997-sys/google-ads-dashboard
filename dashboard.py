@@ -723,6 +723,70 @@ else:
     st.info(
         "No campaign data available."
     )
+# ==================================================
+# SMART ALERTS
+# ==================================================
+
+st.divider()
+st.header("🚨 Smart Alerts")
+
+alerts = []
+
+# High CPA Alert
+if overall_cpa > 2000:
+    alerts.append(
+        f"🔴 High CPA Alert: Your CPA is ₹{overall_cpa:,.2f}. "
+        "Consider reducing spend on expensive keywords."
+    )
+
+# Low CTR Alert
+if overall_ctr < 3:
+    alerts.append(
+        f"⚠️ Low CTR Alert: Your CTR is {overall_ctr:.2f}%. "
+        "Improve ad copy and keyword relevance."
+    )
+
+# Low Conversion Rate Alert
+if overall_conversion_rate < 2:
+    alerts.append(
+        f"⚠️ Low Conversion Rate: {overall_conversion_rate:.2f}%. "
+        "Review landing page and search terms."
+    )
+
+# High CPC Alert
+if overall_cpc > 60:
+    alerts.append(
+        f"💰 High CPC Alert: Average CPC is ₹{overall_cpc:.2f}. "
+        "Focus on high-intent keywords."
+    )
+
+# Waste Spend Alert
+if 'waste_df' in locals() and not waste_df.empty:
+
+    total_waste = waste_df["Cost (₹)"].sum()
+
+    if total_waste > 500:
+
+        alerts.append(
+            f"🔴 Potential Waste Spend: ₹{total_waste:,.2f} spent "
+            "on search terms with 0 conversions."
+        )
+
+
+# DISPLAY ALERTS
+
+if alerts:
+
+    for alert in alerts:
+
+        st.warning(alert)
+
+else:
+
+    st.success(
+        "🟢 Great! No major performance alerts detected."
+    )
+
 st.divider()
 # ==================================================
 # ASK AI
