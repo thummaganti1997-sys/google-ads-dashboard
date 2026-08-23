@@ -4,7 +4,9 @@ from google.ads.googleads.client import GoogleAdsClient
 from openai import OpenAI
 
 
-# ---------------- PAGE SETTINGS ----------------
+# ==================================================
+# PAGE SETTINGS
+# ==================================================
 
 st.set_page_config(
     page_title="Google Ads AI Dashboard",
@@ -14,7 +16,9 @@ st.set_page_config(
 st.title("🤖 Google Ads AI Dashboard")
 
 
-# ---------------- DATE FILTER ----------------
+# ==================================================
+# DATE FILTER
+# ==================================================
 
 date_option = st.selectbox(
     "📅 Select Date Range",
@@ -32,7 +36,9 @@ date_range = date_range_map[date_option]
 
 try:
 
-    # ---------------- GOOGLE ADS CONNECTION ----------------
+    # ==================================================
+    # GOOGLE ADS CONNECTION
+    # ==================================================
 
     credentials = {
         "developer_token": st.secrets["google_ads"]["developer_token"],
@@ -48,10 +54,16 @@ try:
 
     ga_service = client.get_service("GoogleAdsService")
 
+    openai_client = OpenAI(
+        api_key=st.secrets["openai"]["api_key"]
+    )
 
-    # ---------------- CAMPAIGN QUERY ----------------
 
-    query = f"""
+    # ==================================================
+    # CAMPAIGN DATA
+    # ==================================================
+
+    campaign_query = f"""
         SELECT
             campaign.name,
             campaign.status,
@@ -64,26 +76,52 @@ try:
         ORDER BY metrics.cost_micros DESC
     """
 
-    response = ga_service.search(
+    campaign_response = ga_service.search(
         customer_id=customer_id,
-        query=query
+        query=campaign_query
     )
 
-    data = []
+    campaign_data = []
 
-    for row in response:
+    for row in campaign_response:
 
-        data.append({
+        impressions = row.metrics.impressions
+        clicks = row.metrics.clicks
+        cost = row.metrics.cost_micros / 1_000_000
+        conversions = row.metrics.conversions
+
+        ctr = (
+            clicks / impressions * 100
+            if impressions else 0
+        )
+
+        cpc = (
+            cost / clicks
+            if clicks else 0
+        )
+
+        cpa = (
+            cost / conversions
+            if conversions else 0
+        )
+
+        conversion_rate = (
+            conversions / clicks * 100
+            if clicks else 0
+        )
+
+        campaign_data.append({
             "Campaign": row.campaign.name,
             "Status": row.campaign.status.name,
-            "Impressions": row.metrics.impressions,
-            "Clicks": row.metrics.clicks,
-            "Cost (₹)": round(
-                row.metrics.cost_micros / 1_000_000,
-                2
-            ),
-            "Conversions": round(
-                row.metrics.conversions,
+            "Impressions": impressions,
+            "Clicks": clicks,
+            "Cost (₹)": round(cost, 2),
+            "Conversions": round(conversions, 2),
+            "CTR %": round(ctr, 2),
+            "Avg CPC (₹)": round(cpc, 2),
+            "CPA (₹)": round(cpa, 2),
+            "Conversion Rate %": round(
+                conversion_rate,
                 2
             )
         })
@@ -92,14 +130,14 @@ try:
     st.success("Google Ads Connected Successfully! 🎉")
 
 
-    # ---------------- DATA AVAILABLE ----------------
+    if campaign_data:
 
-    if data:
-
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(campaign_data)
 
 
-        # ---------------- SUMMARY METRICS ----------------
+        # ==================================================
+        # SUMMARY METRICS
+        # ==================================================
 
         total_impressions = df["Impressions"].sum()
 
@@ -109,19 +147,28 @@ try:
 
         total_conversions = df["Conversions"].sum()
 
-
-        ctr = (
+        overall_ctr = (
             total_clicks / total_impressions * 100
             if total_impressions else 0
         )
 
-        cpa = (
+        overall_cpc = (
+            total_cost / total_clicks
+            if total_clicks else 0
+        )
+
+        overall_cpa = (
             total_cost / total_conversions
             if total_conversions else 0
         )
 
+        overall_conversion_rate = (
+            total_conversions / total_clicks * 100
+            if total_clicks else 0
+        )
 
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+        col1, col2, col3, col4 = st.columns(4)
 
         col1.metric(
             "Impressions",
@@ -143,46 +190,62 @@ try:
             f"{total_conversions:.2f}"
         )
 
+
+        col5, col6, col7, col8 = st.columns(4)
+
         col5.metric(
             "CTR",
-            f"{ctr:.2f}%"
+            f"{overall_ctr:.2f}%"
         )
 
         col6.metric(
+            "Avg CPC",
+            f"₹{overall_cpc:.2f}"
+        )
+
+        col7.metric(
             "CPA",
-            f"₹{cpa:,.2f}"
+            f"₹{overall_cpa:.2f}"
+        )
+
+        col8.metric(
+            "Conversion Rate",
+            f"{overall_conversion_rate:.2f}%"
         )
 
 
         st.divider()
 
 
-        # ---------------- CAMPAIGN FILTER ----------------
+        # ==================================================
+        # CAMPAIGN FILTER
+        # ==================================================
 
-        campaigns = ["All Campaigns"] + list(
-            df["Campaign"].unique()
-        )
+        campaign_list = [
+            "All Campaigns"
+        ] + list(df["Campaign"].unique())
 
         selected_campaign = st.selectbox(
             "🎯 Select Campaign",
-            campaigns
+            campaign_list
         )
 
+        if selected_campaign == "All Campaigns":
 
-        if selected_campaign != "All Campaigns":
-
-            filtered_df = df[
-                df["Campaign"] == selected_campaign
-            ]
+            filtered_df = df.copy()
 
         else:
 
-            filtered_df = df
+            filtered_df = df[
+                df["Campaign"] == selected_campaign
+            ].copy()
 
 
-        # ---------------- CAMPAIGN TABLE ----------------
+        # ==================================================
+        # CAMPAIGN PERFORMANCE
+        # ==================================================
 
-        st.subheader("📊 Campaign Performance")
+        st.header("📊 Campaign Performance")
 
         st.dataframe(
             filtered_df,
@@ -193,7 +256,44 @@ try:
         st.divider()
 
 
-        # ---------------- DAILY DATA ----------------
+        # ==================================================
+        # CAMPAIGN CHARTS
+        # ==================================================
+
+        st.header("📈 Campaign Comparison")
+
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+
+            st.write("Clicks by Campaign")
+
+            st.bar_chart(
+                filtered_df.set_index("Campaign")["Clicks"]
+            )
+
+        with chart_col2:
+
+            st.write("Cost by Campaign")
+
+            st.bar_chart(
+                filtered_df.set_index("Campaign")["Cost (₹)"]
+            )
+
+
+        st.write("Conversions by Campaign")
+
+        st.bar_chart(
+            filtered_df.set_index("Campaign")["Conversions"]
+        )
+
+
+        st.divider()
+
+
+        # ==================================================
+        # DAILY DATA
+        # ==================================================
 
         daily_query = f"""
             SELECT
@@ -207,30 +307,44 @@ try:
             ORDER BY segments.date
         """
 
-
         daily_response = ga_service.search(
             customer_id=customer_id,
             query=daily_query
         )
 
-
         daily_data = []
-
 
         for row in daily_response:
 
+            impressions = row.metrics.impressions
+            clicks = row.metrics.clicks
+            cost = row.metrics.cost_micros / 1_000_000
+            conversions = row.metrics.conversions
+
+            daily_ctr = (
+                clicks / impressions * 100
+                if impressions else 0
+            )
+
+            daily_cpc = (
+                cost / clicks
+                if clicks else 0
+            )
+
+            daily_cpa = (
+                cost / conversions
+                if conversions else 0
+            )
+
             daily_data.append({
                 "Date": str(row.segments.date),
-                "Impressions": row.metrics.impressions,
-                "Clicks": row.metrics.clicks,
-                "Cost": round(
-                    row.metrics.cost_micros / 1_000_000,
-                    2
-                ),
-                "Conversions": round(
-                    row.metrics.conversions,
-                    2
-                )
+                "Impressions": impressions,
+                "Clicks": clicks,
+                "Cost": round(cost, 2),
+                "Conversions": round(conversions, 2),
+                "CTR": round(daily_ctr, 2),
+                "CPC": round(daily_cpc, 2),
+                "CPA": round(daily_cpa, 2)
             })
 
 
@@ -242,35 +356,54 @@ try:
                 daily_df["Date"]
             )
 
-
-            st.subheader("📈 Daily Performance")
-
-
-            chart1, chart2 = st.columns(2)
+            daily_df = daily_df.set_index("Date")
 
 
-            with chart1:
+            st.header("📅 Daily Performance")
+
+
+            col1, col2 = st.columns(2)
+
+            with col1:
 
                 st.write("Clicks per Day")
 
                 st.line_chart(
-                    daily_df.set_index("Date")["Clicks"]
+                    daily_df["Clicks"]
                 )
 
-
-            with chart2:
+            with col2:
 
                 st.write("Cost per Day")
 
                 st.line_chart(
-                    daily_df.set_index("Date")["Cost"]
+                    daily_df["Cost"]
+                )
+
+
+            col3, col4 = st.columns(2)
+
+            with col3:
+
+                st.write("CTR per Day")
+
+                st.line_chart(
+                    daily_df["CTR"]
+                )
+
+            with col4:
+
+                st.write("CPC per Day")
+
+                st.line_chart(
+                    daily_df["CPC"]
                 )
 
 
             st.write("Conversions per Day")
 
             st.line_chart(
-                daily_df.set_index("Date")["Conversions"]
+                daily_df["Conversions"]
             )
 
 
@@ -278,79 +411,178 @@ try:
 
 
         # ==================================================
-        # ASK AI ABOUT CAMPAIGN
+        # SEARCH TERMS ANALYSIS
+        # ==================================================
+
+        st.header("🔍 Search Terms Analysis")
+
+        search_query = f"""
+            SELECT
+                search_term_view.search_term,
+                campaign.name,
+                metrics.impressions,
+                metrics.clicks,
+                metrics.cost_micros,
+                metrics.conversions
+            FROM search_term_view
+            WHERE segments.date DURING {date_range}
+            ORDER BY metrics.cost_micros DESC
+            LIMIT 100
+        """
+
+        search_response = ga_service.search(
+            customer_id=customer_id,
+            query=search_query
+        )
+
+        search_data = []
+
+        for row in search_response:
+
+            search_data.append({
+                "Search Term": row.search_term_view.search_term,
+                "Campaign": row.campaign.name,
+                "Impressions": row.metrics.impressions,
+                "Clicks": row.metrics.clicks,
+                "Cost (₹)": round(
+                    row.metrics.cost_micros / 1_000_000,
+                    2
+                ),
+                "Conversions": round(
+                    row.metrics.conversions,
+                    2
+                )
+            })
+
+
+        if search_data:
+
+            search_df = pd.DataFrame(search_data)
+
+            st.dataframe(
+                search_df,
+                use_container_width=True
+            )
+
+        else:
+
+            st.info(
+                "No search term data found for this period."
+            )
+
+
+        st.divider()
+
+
+        # ==================================================
+        # WASTE SPEND DETECTION
+        # ==================================================
+
+        st.header("💸 Potential Waste Spend")
+
+        if search_data:
+
+            waste_df = search_df[
+                (search_df["Cost (₹)"] > 0) &
+                (search_df["Conversions"] == 0)
+            ].copy()
+
+            if not waste_df.empty:
+
+                waste_df = waste_df.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
+
+                st.warning(
+                    "These search terms have spend but no conversions."
+                )
+
+                st.dataframe(
+                    waste_df,
+                    use_container_width=True
+                )
+
+            else:
+
+                st.success(
+                    "No obvious zero-conversion spend found."
+                )
+
+
+        st.divider()
+
+
+        # ==================================================
+        # ASK AI
         # ==================================================
 
         st.header("🤖 Ask AI About Your Campaign")
 
-
         question = st.text_input(
             "Ask a question about your Google Ads campaigns",
-            placeholder="Example: Why is my CPA high?"
+            placeholder=(
+                "Example: Why am I getting clicks but no conversions?"
+            ),
+            key="general_question"
         )
 
-
-        if st.button("Analyze with AI"):
+        if st.button(
+            "Analyze with AI",
+            key="analyze_button"
+        ):
 
             if question:
 
-                openai_client = OpenAI(
-                    api_key=st.secrets["openai"]["api_key"]
-                )
-
-
-                campaign_data = filtered_df.to_string(
+                ai_campaign_data = filtered_df.to_string(
                     index=False
                 )
-
 
                 prompt = f"""
 You are a professional Google Ads expert.
 
-Analyze the following Google Ads campaign data:
+Analyze this campaign data:
 
-{campaign_data}
+{ai_campaign_data}
 
 Overall metrics:
-
 Impressions: {total_impressions}
 Clicks: {total_clicks}
 Cost: ₹{total_cost:.2f}
 Conversions: {total_conversions:.2f}
-CTR: {ctr:.2f}%
-CPA: ₹{cpa:.2f}
+CTR: {overall_ctr:.2f}%
+CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
 
 User question:
-
 {question}
 
-Give a clear answer with:
-
-1. Performance analysis
-2. Possible reasons
+Give:
+1. Clear analysis
+2. Possible causes
 3. Specific recommendations
-4. What should be changed first
+4. Priority action plan
 
-Keep the answer practical and easy to understand.
+Be practical and concise.
 """
 
-
                 with st.spinner(
-                    "AI is analyzing your campaigns..."
+                    "AI is analyzing your campaign..."
                 ):
 
-                    response = openai_client.responses.create(
-                        model="gpt-5.4-mini",
-                        input=prompt
+                    ai_response = (
+                        openai_client.responses.create(
+                            model="gpt-5.4-mini",
+                            input=prompt
+                        )
                     )
-
 
                 st.subheader("🤖 AI Analysis")
 
                 st.write(
-                    response.output_text
+                    ai_response.output_text
                 )
-
 
             else:
 
@@ -363,77 +595,231 @@ Keep the answer practical and easy to understand.
 
 
         # ==================================================
-        # CAMPAIGN-WISE AI RECOMMENDATIONS
+        # CAMPAIGN-WISE AI RECOMMENDATION
         # ==================================================
 
         st.header(
-            "🤖 Campaign-wise AI Recommendations"
+            "🎯 Campaign-wise AI Recommendations"
         )
 
-
-        selected_ai_campaign = st.selectbox(
-            "Select a campaign for AI recommendation",
-            list(df["Campaign"].unique())
+        ai_campaign = st.selectbox(
+            "Select campaign",
+            list(df["Campaign"].unique()),
+            key="ai_campaign_select"
         )
 
+        if st.button(
+            "Get AI Recommendation",
+            key="campaign_ai_button"
+        ):
 
-        if st.button("Get AI Recommendation"):
-
-            campaign_row = df[
-                df["Campaign"] == selected_ai_campaign
+            selected_data = df[
+                df["Campaign"] == ai_campaign
             ]
 
+            prompt = f"""
+You are a Google Ads optimization expert.
 
-            campaign_data = campaign_row.to_string(
-                index=False
-            )
+Analyze this campaign:
 
-
-            openai_client = OpenAI(
-                api_key=st.secrets["openai"]["api_key"]
-            )
-
-
-            recommendation_prompt = f"""
-You are a professional Google Ads expert.
-
-Analyze this Google Ads campaign:
-
-{campaign_data}
+{selected_data.to_string(index=False)}
 
 Give:
 
-1. Campaign performance summary
-2. Main problems found
-3. What is working well
-4. What needs improvement
-5. Budget recommendations
-6. Keyword recommendations
-7. Conversion improvement suggestions
-8. Top 3 actions to take immediately
+1. Performance Summary
+2. Main Problems
+3. What Is Working Well
+4. Budget Recommendation
+5. Bidding Recommendation
+6. Keyword Recommendation
+7. Conversion Improvement Plan
+8. Top 3 Actions to Take Now
 
-Keep the answer practical, clear and easy to understand.
+Keep it practical.
 """
 
-
             with st.spinner(
-                "AI is generating recommendations..."
+                "AI is preparing recommendations..."
             ):
 
                 recommendation_response = (
                     openai_client.responses.create(
                         model="gpt-5.4-mini",
-                        input=recommendation_prompt
+                        input=prompt
                     )
                 )
 
-
             st.subheader(
-                "🤖 AI Recommendation"
+                "🤖 AI Campaign Recommendation"
             )
 
             st.write(
                 recommendation_response.output_text
+            )
+
+
+        st.divider()
+
+
+        # ==================================================
+        # AI KEYWORD + NEGATIVE KEYWORDS
+        # ==================================================
+
+        st.header(
+            "🔑 AI Keyword & Negative Keyword Suggestions"
+        )
+
+        keyword_campaign = st.selectbox(
+            "Select campaign for keyword analysis",
+            list(df["Campaign"].unique()),
+            key="keyword_campaign_select"
+        )
+
+        if st.button(
+            "Get Keyword Suggestions",
+            key="keyword_button"
+        ):
+
+            selected_keyword_data = df[
+                df["Campaign"] == keyword_campaign
+            ]
+
+            search_context = ""
+
+            if search_data:
+
+                campaign_search_terms = search_df[
+                    search_df["Campaign"] == keyword_campaign
+                ]
+
+                search_context = campaign_search_terms.to_string(
+                    index=False
+                )
+
+            keyword_prompt = f"""
+You are a Google Ads keyword specialist.
+
+Business type: Homecare services.
+
+Campaign data:
+
+{selected_keyword_data.to_string(index=False)}
+
+Search term data:
+
+{search_context}
+
+Provide:
+
+1. High-intent keywords to add
+2. Long-tail keywords
+3. Exact match keywords
+4. Phrase match keywords
+5. Negative keywords
+6. Search terms that may waste budget
+7. Top 10 keywords to test first
+
+Clearly separate positive and negative keywords.
+
+Focus on generating genuine customer calls and leads.
+"""
+
+            with st.spinner(
+                "AI is generating keyword suggestions..."
+            ):
+
+                keyword_response = (
+                    openai_client.responses.create(
+                        model="gpt-5.4-mini",
+                        input=keyword_prompt
+                    )
+                )
+
+            st.subheader(
+                "🔑 AI Keyword Recommendations"
+            )
+
+            st.write(
+                keyword_response.output_text
+            )
+
+
+        st.divider()
+
+
+        # ==================================================
+        # DAILY AI OPTIMIZATION
+        # ==================================================
+
+        st.header(
+            "⚡ AI Optimization Plan"
+        )
+
+        if st.button(
+            "What Should I Optimize Today?",
+            key="daily_optimization_button"
+        ):
+
+            search_summary = (
+                search_df.head(20).to_string(index=False)
+                if search_data else
+                "No search term data available."
+            )
+
+            optimization_prompt = f"""
+You are a senior Google Ads optimization expert.
+
+Analyze the account performance below.
+
+Campaign data:
+
+{df.to_string(index=False)}
+
+Overall:
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+
+Top search terms:
+
+{search_summary}
+
+Give a prioritized action plan:
+
+1. STOP or reduce waste
+2. Keywords to add
+3. Negative keywords to add
+4. Campaigns to increase budget
+5. Campaigns to reduce budget
+6. Bidding changes
+7. Conversion tracking issues to check
+8. Top 5 actions to do today
+
+Be specific and practical.
+"""
+
+            with st.spinner(
+                "AI is creating your optimization plan..."
+            ):
+
+                optimization_response = (
+                    openai_client.responses.create(
+                        model="gpt-5.4-mini",
+                        input=optimization_prompt
+                    )
+                )
+
+            st.subheader(
+                "⚡ Today's AI Action Plan"
+            )
+
+            st.write(
+                optimization_response.output_text
             )
 
 
