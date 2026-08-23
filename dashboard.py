@@ -284,7 +284,97 @@ try:
 
         else:
 
-            filtered_df = df[
+            filtered_df = df[        # ==================================================
+        # CAMPAIGN PERFORMANCE SCORE
+        # ==================================================
+
+        selected_impressions = filtered_df["Impressions"].sum()
+        selected_clicks = filtered_df["Clicks"].sum()
+        selected_cost = filtered_df["Cost (₹)"].sum()
+        selected_conversions = filtered_df["Conversions"].sum()
+
+        selected_ctr = (
+            selected_clicks / selected_impressions * 100
+            if selected_impressions else 0
+        )
+
+        selected_cpc = (
+            selected_cost / selected_clicks
+            if selected_clicks else 0
+        )
+
+        selected_conversion_rate = (
+            selected_conversions / selected_clicks * 100
+            if selected_clicks else 0
+        )
+
+        # Score calculation
+
+        performance_score = 0
+
+        # CTR Score
+        if selected_ctr >= 10:
+            performance_score += 30
+        elif selected_ctr >= 5:
+            performance_score += 20
+        elif selected_ctr >= 3:
+            performance_score += 10
+
+        # Conversion Rate Score
+        if selected_conversion_rate >= 10:
+            performance_score += 40
+        elif selected_conversion_rate >= 5:
+            performance_score += 30
+        elif selected_conversion_rate >= 2:
+            performance_score += 20
+        elif selected_conversion_rate > 0:
+            performance_score += 10
+
+        # CPC Score
+        if selected_cpc <= 30:
+            performance_score += 30
+        elif selected_cpc <= 50:
+            performance_score += 20
+        elif selected_cpc <= 70:
+            performance_score += 10
+
+
+        st.header("🎯 Campaign Performance Score")
+
+        score_col1, score_col2, score_col3 = st.columns(3)
+
+        score_col1.metric(
+            "Performance Score",
+            f"{performance_score}/100"
+        )
+
+        score_col2.metric(
+            "CTR",
+            f"{selected_ctr:.2f}%"
+        )
+
+        score_col3.metric(
+            "Conversion Rate",
+            f"{selected_conversion_rate:.2f}%"
+        )
+
+
+        if performance_score >= 70:
+            st.success(
+                "🟢 Excellent Performance"
+            )
+
+        elif performance_score >= 40:
+            st.warning(
+                "🟡 Average Performance – Optimization Needed"
+            )
+
+        else:
+            st.error(
+                "🔴 Poor Performance – Immediate Action Needed"
+            )
+
+        st.divider()
                 df["Campaign"] == selected_campaign
             ].copy()
 
