@@ -1115,7 +1115,164 @@ try:
             st.info(
                 "No winning keywords found yet."
             )
+            
+# ==================================================
+# KEYWORD RECOMMENDATIONS
+# ==================================================
 
+st.divider()
+st.header("🔥 Keyword Recommendations")
+
+if not keyword_df.empty:
+
+    keyword_recommendations = []
+
+    for _, row in keyword_df.iterrows():
+
+        keyword = row["Keyword"]
+        cost = row["Cost (₹)"]
+        conversions = row["Conversions"]
+        clicks = row["Clicks"]
+
+        if conversions >= 2:
+
+            action = "🟢 Keep / Increase"
+
+            recommendation = (
+                "Good performance. Keep running this keyword. "
+                "Consider increasing budget or bid if CPA is acceptable."
+            )
+
+        elif conversions > 0:
+
+            action = "🟡 Monitor"
+
+            recommendation = (
+                "Keyword is generating conversions. "
+                "Continue monitoring CPA and conversion volume."
+            )
+
+        elif cost >= 500 and conversions == 0:
+
+            action = "🔴 Pause / Reduce"
+
+            recommendation = (
+                "High spend with zero conversions. "
+                "Consider pausing this keyword or reducing bid."
+            )
+
+        elif clicks >= 10 and conversions == 0:
+
+            action = "🟠 Review"
+
+            recommendation = (
+                "Getting clicks but no conversions. "
+                "Check search terms, landing page, and add negative keywords if needed."
+            )
+
+        else:
+
+            action = "🟡 Monitor"
+
+            recommendation = (
+                "Not enough data yet. Continue monitoring performance."
+            )
+
+        keyword_recommendations.append({
+
+            "Keyword": keyword,
+
+            "Campaign": row["Campaign"],
+
+            "Cost (₹)": cost,
+
+            "Clicks": clicks,
+
+            "Conversions": conversions,
+
+            "Action": action,
+
+            "Recommendation": recommendation
+
+        })
+
+
+    keyword_recommendation_df = pd.DataFrame(
+        keyword_recommendations
+    )
+
+    st.dataframe(
+        keyword_recommendation_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # ------------------------------------------
+    # PAUSE / REDUCE KEYWORDS
+    # ------------------------------------------
+
+    st.subheader(
+        "🔴 Keywords Needing Attention"
+    )
+
+    attention_df = keyword_recommendation_df[
+        keyword_recommendation_df["Action"].isin(
+            [
+                "🔴 Pause / Reduce",
+                "🟠 Review"
+            ]
+        )
+    ].copy()
+
+    if not attention_df.empty:
+
+        st.dataframe(
+            attention_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.success(
+            "No keywords currently need major attention."
+        )
+
+
+    # ------------------------------------------
+    # BEST KEYWORDS
+    # ------------------------------------------
+
+    st.subheader(
+        "🟢 Recommended Keywords to Keep"
+    )
+
+    best_keyword_df = keyword_recommendation_df[
+        keyword_recommendation_df["Action"]
+        == "🟢 Keep / Increase"
+    ].copy()
+
+    if not best_keyword_df.empty:
+
+        st.dataframe(
+            best_keyword_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.info(
+            "No strong winning keywords found yet."
+        )
+
+
+else:
+
+    st.info(
+        "No keyword data available for recommendations."
+    )
 
         # ------------------------------------------
         # WASTE KEYWORDS
