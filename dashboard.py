@@ -1,6 +1,5 @@
         # ---------------- KEYWORD AI RECOMMENDATIONS ----------------
-
-        st.divider()
+ st.divider()
 
         st.header("🔑 AI Keyword Recommendations")
 
