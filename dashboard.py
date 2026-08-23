@@ -382,15 +382,15 @@ try:
         st.dataframe(
             filtered_df,
             use_container_width=True
-        )
-
-
+        ) 
+        
         st.divider()
 
 
         # ==================================================
         # CAMPAIGN CHARTS
         # ==================================================
+         except Exception as e:
 
         st.header("📈 Campaign Comparison")
 
