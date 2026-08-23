@@ -404,17 +404,7 @@ try:
 
             st.bar_chart(click_chart)  
       
-            
-            )
-        with chart_col2:
-
-            st.subheader("Cost by Campaign")
-
-            cost_chart = filtered_df[
-                ["Campaign", "Cost (₹)"]
-            ].set_index("Campaign")
-
-            st.bar_chart(cost_chart)
+       
      
 
         st.write("Conversions by Campaign")
@@ -422,7 +412,14 @@ try:
         st.bar_chart(
             filtered_df.set_index("Campaign")["Conversions"]
         )
+        with chart_col2:
+            st.subheader("Cost by Campaign")
 
+            cost_chart = filtered_df[
+                ["Campaign", "Cost (₹)"]
+            ].set_index("Campaign")
+
+            st.bar_chart(cost_chart)
 
         st.divider()
 
