@@ -1072,35 +1072,29 @@ try:
         })
 
 
-if keyword_data:
+try:
 
-    keyword_df = pd.DataFrame(
-        keyword_data
-    )
+    if keyword_data:
 
-    st.dataframe(
-        keyword_df,
-        use_container_width=True,
-        hide_index=True
-    )
+        keyword_df = pd.DataFrame(keyword_data)
 
-else:
+        st.dataframe(
+            keyword_df,
+            use_container_width=True,
+            hide_index=True
+        )
 
-    keyword_df = pd.DataFrame()
+    else:
 
-    st.info(
-        "No keyword data available for the selected date range."
-    )
+        st.info("No keyword data available.")
 
 except Exception as e:
-
-    keyword_df = pd.DataFrame()
 
     st.error(
         f"Keyword Performance Error: {e}"
     )
-    
 
+    
         # ------------------------------------------
         # TOP PERFORMING KEYWORDS
         # ------------------------------------------
