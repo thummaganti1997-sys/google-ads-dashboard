@@ -547,18 +547,93 @@ except Exception as e:
             search_df = pd.DataFrame()
 
             st.info(
-                "No search term data found."
+                
+# ==================================================
+# SEARCH TERMS ANALYSIS
+# ==================================================
+
+st.divider()
+st.header("🔍 Search Terms Analysis")
+
+try:
+
+    search_query = f"""
+        SELECT
+            search_term_view.search_term,
+            campaign.name,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.cost_micros,
+            metrics.conversions
+        FROM search_term_view
+        WHERE segments.date DURING {date_range}
+        ORDER BY metrics.cost_micros DESC
+        LIMIT 100
+    """
+
+    search_response = ga_service.search(
+        customer_id=customer_id,
+        query=search_query
+    )
+
+    search_data = []
+
+    for row in search_response:
+
+        impressions = int(row.metrics.impressions or 0)
+        clicks = int(row.metrics.clicks or 0)
+
+        cost = (
+            float(row.metrics.cost_micros or 0)
+            / 1_000_000
+        )
+
+        conversions = float(
+            row.metrics.conversions or 0
+        )
+
+        search_data.append({
+            "Search Term": (
+                row.search_term_view.search_term
+            ),
+            "Campaign": row.campaign.name,
+            "Impressions": impressions,
+            "Clicks": clicks,
+            "Cost (₹)": round(cost, 2),
+            "Conversions": round(
+                conversions,
+                2
             )
+        })
 
-        st.divider()
+
+    if search_data:
+
+        search_df = pd.DataFrame(
+            search_data
+        )
+
+        st.dataframe(
+            search_df,
+            use_container_width=True
+        )
+
+    else:
+
+        search_df = pd.DataFrame()
+
+        st.info(
+            "No search terms found for the selected date range."
+        )
 
 
-        # ==================================================
-        # WASTE SPEND
-        # ==================================================
+except Exception as e:
 
-        st.header("💸 Potential Waste Spend")
+    search_df = pd.DataFrame()
 
+    st.error(
+        f"Search Terms Error: {e}"
+    )
         if not search_df.empty:
 
             waste_df = search_df[
