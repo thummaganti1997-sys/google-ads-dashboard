@@ -954,7 +954,9 @@ if not filtered_df.empty:
 
 else:
 
-    st.info("No campaign data available for budget optimization.") )
+    st.info(
+        "No campaign data available for budget optimization."
+    )
 st.divider()
 # ==================================================
 # ASK AI
