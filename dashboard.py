@@ -1083,7 +1083,12 @@ try:
             use_container_width=True,
             hide_index=True
         )
+        
+except Exception as e:
 
+    st.error(
+        f"Keyword Performance Error: {e}"
+    )
 
         # ------------------------------------------
         # TOP PERFORMING KEYWORDS
@@ -1116,97 +1121,6 @@ try:
                 "No winning keywords found yet."
             )
             
-# ==================================================
-# KEYWORD RECOMMENDATIONS
-# ==================================================
-
-st.divider()
-st.header("🔥 Keyword Recommendations")
-
-if not keyword_df.empty:
-
-    keyword_recommendations = []
-
-    for _, row in keyword_df.iterrows():
-
-        keyword = row["Keyword"]
-        cost = row["Cost (₹)"]
-        conversions = row["Conversions"]
-        clicks = row["Clicks"]
-
-        if conversions >= 2:
-
-            action = "🟢 Keep / Increase"
-
-            recommendation = (
-                "Good performance. Keep running this keyword. "
-                "Consider increasing budget or bid if CPA is acceptable."
-            )
-
-        elif conversions > 0:
-
-            action = "🟡 Monitor"
-
-            recommendation = (
-                "Keyword is generating conversions. "
-                "Continue monitoring CPA and conversion volume."
-            )
-
-        elif cost >= 500 and conversions == 0:
-
-            action = "🔴 Pause / Reduce"
-
-            recommendation = (
-                "High spend with zero conversions. "
-                "Consider pausing this keyword or reducing bid."
-            )
-
-        elif clicks >= 10 and conversions == 0:
-
-            action = "🟠 Review"
-
-            recommendation = (
-                "Getting clicks but no conversions. "
-                "Check search terms, landing page, and add negative keywords if needed."
-            )
-
-        else:
-
-            action = "🟡 Monitor"
-
-            recommendation = (
-                "Not enough data yet. Continue monitoring performance."
-            )
-
-        keyword_recommendations.append({
-
-            "Keyword": keyword,
-
-            "Campaign": row["Campaign"],
-
-            "Cost (₹)": cost,
-
-            "Clicks": clicks,
-
-            "Conversions": conversions,
-
-            "Action": action,
-
-            "Recommendation": recommendation
-
-        })
-
-
-    keyword_recommendation_df = pd.DataFrame(
-        keyword_recommendations
-    )
-
-    st.dataframe(
-        keyword_recommendation_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
 
     # ------------------------------------------
     # PAUSE / REDUCE KEYWORDS
