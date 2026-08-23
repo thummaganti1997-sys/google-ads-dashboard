@@ -262,9 +262,8 @@ Keep the answer practical and easy to understand.
 
                     st.write(response.output_text)
 
-            else:
-                st.warning("Please enter a question.")
-                       # ---------------- CAMPAIGN-WISE AI RECOMMENDATIONS ----------------
+            
+# ---------------- CAMPAIGN-WISE AI RECOMMENDATIONS ----------------                  
 
         st.divider()
         st.header("🤖 Campaign-wise AI Recommendations")
