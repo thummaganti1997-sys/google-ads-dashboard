@@ -800,65 +800,69 @@ if not filtered_df.empty:
     for _, row in filtered_df.iterrows():
 
         campaign = row["Campaign"]
-
         cost = float(row["Cost (₹)"])
         conversions = float(row["Conversions"])
-
         clicks = float(row["Clicks"])
         impressions = float(row["Impressions"])
 
         ctr = (
-            (clicks / impressions * 100)
-            if impressions > 0 else 0
+            clicks / impressions * 100
+            if impressions > 0
+            else 0
         )
 
         cpa = (
-            (cost / conversions)
-            if conversions > 0 else 0
+            cost / conversions
+            if conversions > 0
+            else 0
         )
 
-        # 0 conversions with spend
         if conversions == 0 and cost > 500:
 
-            recommendations.append({
-                "Campaign": campaign,
-                "Status": "🔴 Review / Pause",
-                "Recommendation":
-                    "High spend with 0 conversions. Review keywords and search terms."
-            })
+            status = "🔴 Review / Pause"
+            recommendation = (
+                "High spend with 0 conversions. "
+                "Review keywords and search terms."
+            )
 
-        # High CPA
         elif conversions > 0 and cpa > overall_cpa:
 
-            recommendations.append({
-                "Campaign": campaign,
-                "Status": "⚠️ Optimize",
-                "Recommendation":
-                    f"CPA is ₹{cpa:,.2f}. Reduce waste and improve keyword targeting."
-            })
+            status = "⚠️ Optimize"
+            recommendation = (
+                f"CPA is ₹{cpa:,.2f}. "
+                "Reduce waste and improve keyword targeting."
+            )
 
-        # Good performance
         elif conversions > 0 and cpa <= overall_cpa:
 
-            recommendations.append({
-                "Campaign": campaign,
-                "Status": "🟢 Scale",
-                "Recommendation":
-                    f"Good CPA of ₹{cpa:,.2f}. Consider increasing budget."
-            })
+            status = "🟢 Scale"
+            recommendation = (
+                f"Good CPA of ₹{cpa:,.2f}. "
+                "Consider increasing budget."
+            )
 
-        # High CTR but no conversions
         elif ctr > overall_ctr and conversions == 0:
 
-            recommendations.append({
-                "Campaign": campaign,
-                "Status": "🟡 Check Landing Page",
-                "Recommendation":
-                    "Good CTR but no conversions. Review landing page and conversion tracking."
-            })
+            status = "🟡 Check Landing Page"
+            recommendation = (
+                "Good CTR but no conversions. "
+                "Review landing page and conversion tracking."
+            )
 
+        else:
 
-            if recommendations:
+            status = "🟡 Monitor"
+            recommendation = (
+                "Continue monitoring campaign performance."
+            )
+
+        recommendations.append({
+            "Campaign": campaign,
+            "Status": status,
+            "Recommendation": recommendation
+        })
+
+    if recommendations:
 
         recommendation_df = pd.DataFrame(recommendations)
 
