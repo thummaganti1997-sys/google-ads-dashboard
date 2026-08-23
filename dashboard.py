@@ -427,7 +427,11 @@ try:
         # ==================================================
         # DAILY DATA
         # ==================================================
-
+st.header("📅 Daily Performance")
+daily_df = filtered_df.copy()
+st.line_chart(
+  daily_df.set_index("Date")["Clicks"]
+)
         daily_query = f"""
             SELECT
                 segments.date,
