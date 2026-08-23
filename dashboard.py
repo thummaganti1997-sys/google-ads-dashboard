@@ -1044,8 +1044,6 @@ else:
         hide_index=True
     )
 
-else:
-    st.success("No major keyword waste found.")
 
 
 st.divider()
