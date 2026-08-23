@@ -1072,23 +1072,25 @@ try:
         })
 
 
-        if keyword_data:
+if keyword_data:
 
-        keyword_df = pd.DataFrame(keyword_data)
+    keyword_df = pd.DataFrame(
+        keyword_data
+    )
 
-        st.dataframe(
-            keyword_df,
-            use_container_width=True,
-            hide_index=True
-        )
+    st.dataframe(
+        keyword_df,
+        use_container_width=True,
+        hide_index=True
+    )
 
-    else:
+else:
 
-        keyword_df = pd.DataFrame()
+    keyword_df = pd.DataFrame()
 
-        st.info(
-            "No keyword data available for the selected date range."
-        )
+    st.info(
+        "No keyword data available for the selected date range."
+    )
 
 except Exception as e:
 
