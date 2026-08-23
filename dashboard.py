@@ -431,8 +431,7 @@ try:
         # DAILY PERFORMANCE
         # ==================================================
 
- 
-             if daily_data:
+if daily_data:            
 
             daily_df = pd.DataFrame(daily_data)
 
