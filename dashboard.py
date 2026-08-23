@@ -1053,11 +1053,7 @@ else:
             )
 
         
-         else:
-
-            st.success(
-                "No major keyword waste found."
-            )
+         
 
 except Exception as e:
 
