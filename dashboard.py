@@ -269,11 +269,12 @@ Keep the answer practical and easy to understand.
         st.divider()
         st.header("🤖 Campaign-wise AI Recommendations")
 
-        selected_ai_campaign = st.selectbox(
-            "Select a campaign for AI recommendation",
-            df["Campaign"].unique()
-       if st.button("Get AI Recommendation"): 
+       selected_ai_campaign = st.selectbox(
+    "Select a campaign for AI recommendation",
+    df["Campaign"].unique()
+)
 
+if st.button("Get AI Recommendation"):
             campaign_row = df[
                 df["Campaign"] == selected_ai_campaign
             ]
