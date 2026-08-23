@@ -1027,12 +1027,7 @@ else:
             "🚨 High Spend + Zero Conversion Keywords"
         )
 
-       # ==========================================
-# HIGH SPEND + ZERO CONVERSION KEYWORDS
-# ==========================================
-
-st.subheader("🚨 High Spend + Zero Conversion Keywords")
-
+      
 
     keyword_df["Status"] == "🔴 Waste"
 ].copy()
