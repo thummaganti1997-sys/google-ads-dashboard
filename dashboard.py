@@ -858,7 +858,7 @@ if not filtered_df.empty:
             })
 
 
-        if recommendations:
+            if recommendations:
 
         recommendation_df = pd.DataFrame(recommendations)
 
