@@ -1030,7 +1030,7 @@ else:
       
 
     keyword_df["Status"] == "🔴 Waste"
-].copy()
+
 
 if not waste_keywords_df.empty:
 
