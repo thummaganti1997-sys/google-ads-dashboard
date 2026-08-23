@@ -878,7 +878,81 @@ else:
 
     st.info(
         "No campaign data available for recommendations."
+   # ==================================================
+# BUDGET OPTIMIZATION
+# ==================================================
+
+st.divider()
+st.header("💰 Budget Optimization Suggestions")
+
+if not filtered_df.empty:
+
+    budget_suggestions = []
+
+    for _, row in filtered_df.iterrows():
+
+        campaign = row["Campaign"]
+        cost = float(row["Cost (₹)"])
+        conversions = float(row["Conversions"])
+
+        cpa = (
+            cost / conversions
+            if conversions > 0 else 0
+        )
+
+        if conversions == 0 and cost > 500:
+
+            action = "🔴 Reduce / Stop"
+            suggestion = (
+                "Spend is high but there are no conversions. "
+                "Reduce budget and review search terms."
+            )
+
+        elif conversions > 0 and cpa < overall_cpa * 0.8:
+
+            action = "🟢 Increase Budget"
+            suggestion = (
+                f"Strong performance with CPA ₹{cpa:,.2f}. "
+                "Consider increasing budget by 10–20%."
+            )
+
+        elif conversions > 0 and cpa > overall_cpa * 1.2:
+
+            action = "🟠 Reduce Budget"
+            suggestion = (
+                f"CPA ₹{cpa:,.2f} is above average. "
+                "Optimize keywords before increasing spend."
+            )
+
+        else:
+
+            action = "🟡 Maintain"
+            suggestion = (
+                "Performance is close to account average. "
+                "Keep budget stable and continue monitoring."
+            )
+
+        budget_suggestions.append({
+            "Campaign": campaign,
+            "Cost (₹)": round(cost, 2),
+            "Conversions": round(conversions, 2),
+            "CPA (₹)": round(cpa, 2) if conversions > 0 else "N/A",
+            "Action": action,
+            "Suggestion": suggestion
+        })
+
+
+    budget_df = pd.DataFrame(budget_suggestions)
+
+    st.dataframe(
+        budget_df,
+        use_container_width=True,
+        hide_index=True
     )
+
+else:
+
+    st.info("No campaign data available for budget optimization.") )
 st.divider()
 # ==================================================
 # ASK AI
