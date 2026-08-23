@@ -429,7 +429,6 @@ try:
 st.divider()
 st.header("📅 Daily Performance")
 
-try:
 
     daily_query = f"""
         SELECT
@@ -532,8 +531,6 @@ try:
     else:
         st.warning("Daily performance data is not available.")
 
-except Exception as e:
-    st.error(f"Daily Performance Error: {e}")
 
              # ==================================================
         # DAILY PERFORMANCE
