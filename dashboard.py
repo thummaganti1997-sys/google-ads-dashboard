@@ -391,14 +391,18 @@ except Exception as e:
   # ==================================================
 # CAMPAIGN CHARTS
 # ==================================================
+
 except Exception as e:
     st.error(f"Error: {e}")
 
 # CAMPAIGN CHARTS
 
 st.header("📈 Campaign Comparison")
-
 if not filtered_df.empty:
+# ==================================================
+# CAMPAIGN CHARTS
+# ==================================================
+
 st.header("📈 Campaign Comparison")
 
 if not filtered_df.empty:
@@ -406,6 +410,7 @@ if not filtered_df.empty:
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
+
         st.subheader("Clicks by Campaign")
 
         click_chart = filtered_df[
@@ -429,6 +434,7 @@ if not filtered_df.empty:
         )
 
     with chart_col2:
+
         st.subheader("Cost by Campaign")
 
         cost_chart = filtered_df[
@@ -441,6 +447,7 @@ if not filtered_df.empty:
         )
 
 else:
+
     st.warning("Campaign data is not available.")
 
 st.divider()
