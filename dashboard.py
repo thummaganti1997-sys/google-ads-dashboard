@@ -1056,14 +1056,10 @@ if not waste_keywords_df.empty:
     )
 
 else:
-
-    st.success("No major keyword waste found.") 
+    st.success("No major keyword waste found.")
 
 except Exception as e:
-
-    st.error(
-        f"Keyword Performance Error: {e}"
-    ) 
+    st.error(f"Keyword Performance Error: {e}")
 st.divider()
 # ==================================================
 # ASK AI
