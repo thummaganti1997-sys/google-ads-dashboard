@@ -272,7 +272,7 @@ Keep the answer practical and easy to understand.
         selected_ai_campaign = st.selectbox(
             "Select a campaign for AI recommendation",
             df["Campaign"].unique()
-        )        if st.button("Get AI Recommendation"):
+       if st.button("Get AI Recommendation"): 
 
             campaign_row = df[
                 df["Campaign"] == selected_ai_campaign
