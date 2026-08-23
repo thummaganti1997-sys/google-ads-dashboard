@@ -431,6 +431,13 @@ try:
         # DAILY PERFORMANCE
         # ==================================================
 
+except Exception as e:
+    st.error(f"Error: {e}")
+
+# DAILY DATA
+
+if daily_data:
+
 if daily_data:            
 
             daily_df = pd.DataFrame(daily_data)
