@@ -432,60 +432,7 @@ try:
         # ==================================================
 
  
-        daily_query = f"""
-            SELECT
-                segments.date,
-                metrics.impressions,
-                metrics.clicks,
-                metrics.cost_micros,
-                metrics.conversions
-            FROM customer
-            WHERE segments.date DURING {date_range}
-            ORDER BY segments.date
-        """
-
-        daily_response = ga_service.search(
-            customer_id=customer_id,
-            query=daily_query
-        )
-
-        daily_data = []
-
-        for row in daily_response:
-
-            impressions = row.metrics.impressions
-            clicks = row.metrics.clicks
-            cost = row.metrics.cost_micros / 1_000_000
-            conversions = row.metrics.conversions
-
-            daily_ctr = (
-                clicks / impressions * 100
-                if impressions else 0
-            )
-
-            daily_cpc = (
-                cost / clicks
-                if clicks else 0
-            )
-
-            daily_cpa = (
-                cost / conversions
-                if conversions else 0
-            )
-
-            daily_data.append({
-                "Date": str(row.segments.date),
-                "Impressions": impressions,
-                "Clicks": clicks,
-                "Cost": round(cost, 2),
-                "Conversions": round(conversions, 2),
-                "CTR": round(daily_ctr, 2),
-                "CPC": round(daily_cpc, 2),
-                "CPA": round(daily_cpa, 2)
-            })
-
-
-        if daily_data:
+             if daily_data:
 
             daily_df = pd.DataFrame(daily_data)
 
@@ -495,7 +442,22 @@ try:
 
             daily_df = daily_df.set_index("Date")
 
+            st.header("📅 Daily Performance")
 
+            st.subheader("Clicks per Day")
+            st.line_chart(daily_df["Clicks"])
+
+            st.subheader("Cost per Day")
+            st.line_chart(daily_df["Cost"])
+
+            st.subheader("CTR per Day")
+            st.line_chart(daily_df["CTR"])
+
+            st.subheader("CPC per Day")
+            st.line_chart(daily_df["CPC"])
+
+            st.subheader("Conversions per Day")
+            st.line_chart(daily_df["Conversions"])
             st.header("📅 Daily Performance")
 
 
