@@ -404,7 +404,7 @@ st.header("📈 Campaign Comparison")
         # CONVERSIONS BY CAMPAIGN
         # ------------------------------------------
 
-        with chart_col3:
+      
 
             st.subheader("Conversions by Campaign")
 
