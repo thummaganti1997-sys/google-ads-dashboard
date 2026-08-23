@@ -363,7 +363,8 @@ try:
         )# ==================================================
 # DAILY PERFORMANCE
 # ==================================================
-
+except Exception as e:
+    st.error(f"Error: {e}")
 st.divider()
 st.header("📅 Daily Performance")
 
