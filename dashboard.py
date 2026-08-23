@@ -374,8 +374,7 @@ try:
             )
 
         st.divider()
-                df["Campaign"] == selected_campaign
-            ].copy()
+         
 
 
         # ==================================================
