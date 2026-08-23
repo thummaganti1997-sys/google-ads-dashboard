@@ -512,9 +512,7 @@ except Exception as e:
     st.error(
         f"Daily Performance Error: {e}"
     )
-# ==================================================
-# SEARCH TERMS ANALYSIS
-# ==================================================
+
 
 st.divider()
 
