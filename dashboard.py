@@ -396,6 +396,13 @@ try:
 
         with chart_col1:
             pass
+            st.subheader("Clicks by Campaign")
+
+            click_chart = filtered_df[
+                ["Campaign", "Clicks"]
+            ].set_index("Campaign")
+
+            st.bar_chart(click_chart)  
       
             st.write("Clicks by Campaign")
 
