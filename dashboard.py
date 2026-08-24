@@ -246,6 +246,33 @@ hr {
     margin-bottom: 0;
     font-size: 16px;
 }
+/* SECTION SPACING */
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 3rem;
+}
+
+/* CLEAN SECTION GAP */
+h2 {
+    margin-top: 30px !important;
+    margin-bottom: 14px !important;
+}
+
+/* SUBHEADINGS */
+h3 {
+    margin-top: 18px !important;
+    margin-bottom: 10px !important;
+}
+
+/* TABLE SPACING */
+[data-testid="stDataFrame"] {
+    margin-top: 8px;
+    margin-bottom: 18px;
+}
+
+/* 👆 CODE ఇక్కడ వరకు */
+
+</style>
 </style>
 """, unsafe_allow_html=True)
 
