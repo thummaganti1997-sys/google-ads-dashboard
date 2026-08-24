@@ -1879,11 +1879,9 @@ Do not recommend pausing relevant high-intent keywords only because they have ze
             )
         )
 
-   st.subheader(f"🤖 {report_period} AI Performance Report")
-
-    st.write(
-        daily_report_response.output_text
-    )
+          st.subheader("🤖 Today's AI Performance Report")
+        st.write(daily_ai_response.output_text)
+  
 st.divider()
 # ==================================================
 # FINAL AI RECOMMENDATIONS SUMMARY
