@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-
+from datetime import date, timedelta
 from google.ads.googleads.client import GoogleAdsClient
 from openai import OpenAI
 
@@ -313,14 +313,6 @@ date_option = st.selectbox(
         "Last 1 Year"
     ]
 )
-date_range_map = {
-    "Today": "TODAY",
-    "Last 7 Days": "LAST_7_DAYS",
-    "Last 30 Days": "LAST_30_DAYS"
-}
-
-date_range = date_range_map[date_option]
-
 
 # ==================================================
 # GOOGLE ADS CONNECTION
