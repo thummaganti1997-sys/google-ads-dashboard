@@ -224,8 +224,12 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🤖 Google Ads AI Dashboard")
-
+st.markdown("""
+<div class="dashboard-banner">
+    <h1>🤖 Google Ads AI Dashboard</h1>
+    <p>Smart Performance • AI Insights • Budget Optimization</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ==================================================
 # DATE FILTER
