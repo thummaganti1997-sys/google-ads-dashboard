@@ -269,6 +269,25 @@ h3 {
     margin-top: 8px;
     margin-bottom: 18px;
 }
+/* KPI CARD HOVER */
+[data-testid="stMetric"] {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+[data-testid="stMetric"]:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.10);
+}
+
+/* KPI VALUE SIZE */
+[data-testid="stMetricValue"] {
+    font-size: 28px;
+}
+
+/* KPI LABEL SIZE */
+[data-testid="stMetricLabel"] {
+    font-size: 14px;
+}
 </style>
 """, unsafe_allow_html=True)
 
