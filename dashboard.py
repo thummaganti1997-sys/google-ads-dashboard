@@ -155,6 +155,32 @@ div[data-testid="stMetric"]:nth-of-type(8) {
 [data-testid="stAlert"] {
     border-radius: 12px;
 }
+/* AI STYLE CARDS */
+div[data-testid="stVerticalBlock"]:has(h2) {
+    border-radius: 14px;
+}
+
+/* SPINNER */
+[data-testid="stSpinner"] {
+    background: #f5f3ff;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* SUCCESS MESSAGES */
+[data-testid="stAlert"] {
+    box-shadow: 0 3px 10px rgba(79, 70, 229, 0.08);
+}
+
+/* BUTTON EFFECT */
+.stButton > button {
+    transition: all 0.2s ease;
+}
+
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.25);
+}
 
 /* DIVIDER */
 hr {
