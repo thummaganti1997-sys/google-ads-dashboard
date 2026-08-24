@@ -269,10 +269,6 @@ h3 {
     margin-top: 8px;
     margin-bottom: 18px;
 }
-
-/* 👆 CODE ఇక్కడ వరకు */
-
-</style>
 </style>
 """, unsafe_allow_html=True)
 
