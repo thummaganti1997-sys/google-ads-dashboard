@@ -1782,7 +1782,7 @@ else:
     st.success(
         "🟢 No major actions required right now."
     )
-   # ==================================================
+  # ==================================================
 # ONE-CLICK AI DAILY REPORT
 # ==================================================
 
@@ -1801,9 +1801,10 @@ elif date_option == "Custom Date Range":
 else:
     report_period = date_option
 
+
 if st.button(
     "Generate AI Performance Report",
-    key="daily_ai_report_button"
+    key="one_click_ai_report_generate_button"
 ):
 
     if "priority_df" in locals() and not priority_df.empty:
@@ -1853,7 +1854,9 @@ Include:
 Be practical, clear and concise.
 """
 
-    with st.spinner("AI is generating your performance report..."):
+    with st.spinner(
+        "AI is generating your performance report..."
+    ):
 
         daily_ai_response = openai_client.responses.create(
             model="gpt-5.4-mini",
