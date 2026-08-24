@@ -1782,12 +1782,13 @@ else:
     st.success(
         "🟢 No major actions required right now."
     )
-    # ==================================================
+   # ==================================================
 # ONE-CLICK AI DAILY REPORT
 # ==================================================
 
 st.divider()
 st.header("📋 One-Click AI Daily Report")
+
 if date_option == "Today":
     report_period = "Today's"
 
@@ -1801,35 +1802,22 @@ else:
     report_period = date_option
 
 if st.button(
-    "Generate Today's AI Report",
+    "Generate AI Performance Report",
     key="daily_ai_report_button"
 ):
 
-    waste_amount = 0
-
-    if "waste_df" in locals() and not waste_df.empty:
-        waste_amount = float(
-            waste_df["Cost (₹)"].sum()
-        )
-
-    campaign_summary = (
-        filtered_df.to_string(index=False)
-        if "filtered_df" in locals()
-        else "No campaign data available."
-    )
-
-    priority_summary = (
-        priority_df.to_string(index=False)
-        if "priority_df" in locals()
-        else "No priority action data available."
-    )
+    if "priority_df" in locals() and not priority_df.empty:
+        priority_context = priority_df.to_string(index=False)
+    else:
+        priority_context = "No priority actions currently available."
 
     daily_report_prompt = f"""
-You are a senior Google Ads performance manager.
+You are a senior Google Ads performance analyst.
 
-Create a professional daily performance report for a home care services Google Ads account.
+REPORT PERIOD:
+{report_period}
 
-ACCOUNT SUMMARY
+OVERALL PERFORMANCE:
 
 Impressions: {total_impressions}
 Clicks: {total_clicks}
@@ -1840,49 +1828,45 @@ Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
 
-Potential Waste Spend:
-₹{waste_amount:.2f}
-
 CAMPAIGN DATA:
 
-{campaign_summary}
+{filtered_df.to_string(index=False)}
 
 PRIORITY ACTIONS:
 
-{priority_summary}
+{priority_context}
 
-Create the report with these sections:
+Create a professional Google Ads performance report.
+
+Include:
 
 1. Executive Summary
 2. What Is Working Well
-3. Main Problems
-4. Waste Spend Findings
-5. Campaigns to Increase or Maintain
-6. Campaigns to Reduce or Review
-7. Keyword/Search Term Actions
-8. Budget Recommendation
-9. Conversion Improvement Actions
-10. Top 5 Actions for Today
+3. Problems Detected
+4. Waste Spend Analysis
+5. Campaign Performance
+6. Budget Recommendations
+7. Conversion Improvement Opportunities
+8. Top Priority Actions
+9. Final Recommendation
 
-Be concise, practical, and action-oriented.
-Do not recommend pausing relevant high-intent keywords only because they have zero conversions.
+Be practical, clear and concise.
 """
 
-    with st.spinner(
-        "AI is preparing today's performance report..."
-    ):
+    with st.spinner("AI is generating your performance report..."):
 
-        daily_report_response = (
-            openai_client.responses.create(
-                model="gpt-5.4-mini",
-                input=daily_report_prompt
-            )
+        daily_ai_response = openai_client.responses.create(
+            model="gpt-5.4-mini",
+            input=daily_report_prompt
         )
 
-          st.subheader("🤖 Today's AI Performance Report")
-        st.write(daily_ai_response.output_text)
-  
-st.divider()
+    st.subheader(
+        f"🤖 {report_period} AI Performance Report"
+    )
+
+    st.write(
+        daily_ai_response.output_text
+    )
 # ==================================================
 # FINAL AI RECOMMENDATIONS SUMMARY
 # ==================================================
