@@ -1871,9 +1871,6 @@ Be practical, clear and concise.
         daily_ai_response.output_text
     )
 # ==================================================
-# FINAL AI RECOMMENDATIONS SUMMARY
-# ==================================================
-# ==================================================
 # ONE-CLICK AI DAILY REPORT
 # ==================================================
 
@@ -1892,9 +1889,10 @@ elif date_option == "Custom Date Range":
 else:
     report_period = date_option
 
+
 if st.button(
     "Generate AI Performance Report",
-    key="daily_ai_report_button"
+    key="one_click_ai_report_generate_button_v2"
 ):
 
     if "priority_df" in locals() and not priority_df.empty:
@@ -1930,6 +1928,7 @@ PRIORITY ACTIONS:
 Create a professional Google Ads performance report.
 
 Include:
+
 1. Executive Summary
 2. What Is Working Well
 3. Problems Detected
@@ -1943,7 +1942,10 @@ Include:
 Be practical, clear and concise.
 """
 
-    with st.spinner("AI is generating your performance report..."):
+    with st.spinner(
+        "AI is generating your performance report..."
+    ):
+
         daily_ai_response = openai_client.responses.create(
             model="gpt-5.4-mini",
             input=daily_report_prompt
@@ -1956,6 +1958,12 @@ Be practical, clear and concise.
     st.write(
         daily_ai_response.output_text
     )
+
+
+# ==================================================
+# FINAL AI RECOMMENDATIONS SUMMARY
+# ==================================================
+
 st.divider()
 st.header("📌 Final AI Recommendations Summary")
 
@@ -1977,6 +1985,7 @@ if overall_cpa > 2000 and total_conversions > 0:
     )
 
 if "waste_df" in locals() and not waste_df.empty:
+
     waste_amount = waste_df["Cost (₹)"].sum()
 
     summary_actions.append(
@@ -1994,6 +2003,7 @@ if summary_actions:
         summary_actions[:5],
         start=1
     ):
+
         st.write(
             f"**{i}. {action}**"
         )
