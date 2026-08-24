@@ -537,16 +537,6 @@ try:
                 use_container_width=True
             )
 
-        st.divider()
-
-
-       
-
-        # ==================================================
-        # SEARCH TERMS ANALYSIS
-        # ==================================================
-
-        st.header("🔍 Search Terms Analysis")
 
         search_query = f"""
             SELECT
