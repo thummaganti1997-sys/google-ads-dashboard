@@ -288,6 +288,48 @@ h3 {
 [data-testid="stMetricLabel"] {
     font-size: 14px;
 }
+@media (max-width: 768px) {
+
+    .block-container {
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
+        padding-top: 1rem !important;
+    }
+
+    h1 {
+        font-size: 1.8rem !important;
+    }
+
+    h2 {
+        font-size: 1.45rem !important;
+        line-height: 1.25 !important;
+    }
+
+    h3 {
+        font-size: 1.15rem !important;
+        line-height: 1.25 !important;
+    }
+
+    div[data-testid="stMetric"] {
+        padding: 0.7rem !important;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.25rem !important;
+    }
+
+    div[data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
+
+    div.stButton > button {
+        width: 100% !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
