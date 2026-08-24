@@ -1870,7 +1870,89 @@ Be practical, clear and concise.
 # ==================================================
 # FINAL AI RECOMMENDATIONS SUMMARY
 # ==================================================
+# ==================================================
+# ONE-CLICK AI DAILY REPORT
+# ==================================================
 
+st.divider()
+st.header("📋 One-Click AI Daily Report")
+
+if date_option == "Today":
+    report_period = "Today's"
+
+elif date_option == "Custom Date Range":
+    report_period = (
+        f"{start_date.strftime('%d %b %Y')} → "
+        f"{end_date.strftime('%d %b %Y')}"
+    )
+
+else:
+    report_period = date_option
+
+if st.button(
+    "Generate AI Performance Report",
+    key="daily_ai_report_button"
+):
+
+    if "priority_df" in locals() and not priority_df.empty:
+        priority_context = priority_df.to_string(index=False)
+    else:
+        priority_context = "No priority actions currently available."
+
+    daily_report_prompt = f"""
+You are a senior Google Ads performance analyst.
+
+REPORT PERIOD:
+{report_period}
+
+OVERALL PERFORMANCE:
+
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+Average CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+
+CAMPAIGN DATA:
+
+{filtered_df.to_string(index=False)}
+
+PRIORITY ACTIONS:
+
+{priority_context}
+
+Create a professional Google Ads performance report.
+
+Include:
+1. Executive Summary
+2. What Is Working Well
+3. Problems Detected
+4. Waste Spend Analysis
+5. Campaign Performance
+6. Budget Recommendations
+7. Conversion Improvement Opportunities
+8. Top Priority Actions
+9. Final Recommendation
+
+Be practical, clear and concise.
+"""
+
+    with st.spinner("AI is generating your performance report..."):
+        daily_ai_response = openai_client.responses.create(
+            model="gpt-5.4-mini",
+            input=daily_report_prompt
+        )
+
+    st.subheader(
+        f"🤖 {report_period} AI Performance Report"
+    )
+
+    st.write(
+        daily_ai_response.output_text
+    )
 st.divider()
 st.header("📌 Final AI Recommendations Summary")
 
