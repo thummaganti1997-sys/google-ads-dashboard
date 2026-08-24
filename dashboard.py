@@ -313,7 +313,37 @@ date_option = st.selectbox(
         "Last 1 Year"
     ]
 )
+today = date.today()
 
+if date_option == "Today":
+    date_filter_clause = "segments.date DURING TODAY"
+
+elif date_option == "Last 7 Days":
+    date_filter_clause = "segments.date DURING LAST_7_DAYS"
+
+elif date_option == "Last 30 Days":
+    date_filter_clause = "segments.date DURING LAST_30_DAYS"
+
+elif date_option == "Last 90 Days":
+    start_date = today - timedelta(days=89)
+    date_filter_clause = (
+        f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
+        f"AND '{today:%Y-%m-%d}'"
+    )
+
+elif date_option == "Last 6 Months":
+    start_date = today - timedelta(days=179)
+    date_filter_clause = (
+        f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
+        f"AND '{today:%Y-%m-%d}'"
+    )
+
+elif date_option == "Last 1 Year":
+    start_date = today - timedelta(days=364)
+    date_filter_clause = (
+        f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
+        f"AND '{today:%Y-%m-%d}'"
+    )
 # ==================================================
 # GOOGLE ADS CONNECTION
 # ==================================================
