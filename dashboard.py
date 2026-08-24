@@ -639,7 +639,7 @@ try:
             metrics.cost_micros,
             metrics.conversions
         FROM customer
-        WHERE segments.date DURING {date_range}
+        WHERE {date_filter_clause}
         ORDER BY segments.date
     """
 
