@@ -1314,6 +1314,117 @@ else:
     st.info(
         "Select Last 7 Days or Last 30 Days to compare performance."
     )
+   # ==================================================
+# AI PRIORITY ACTION CENTER
+# ==================================================
+
+st.divider()
+st.header("🎯 AI Priority Action Center")
+
+priority_actions = []
+
+# HIGH CPA
+if overall_cpa > 2000 and total_conversions > 0:
+
+    priority_actions.append({
+        "Priority": "🔴 HIGH",
+        "Area": "CPA",
+        "Problem": f"CPA is high at ₹{overall_cpa:,.2f}",
+        "Action": "Reduce waste spend and focus budget on converting campaigns."
+    })
+
+
+# ZERO / LOW CONVERSIONS
+if total_conversions == 0:
+
+    priority_actions.append({
+        "Priority": "🔴 HIGH",
+        "Area": "Conversions",
+        "Problem": "No conversions recorded.",
+        "Action": "Check conversion tracking, search terms, keywords and landing page."
+    })
+
+elif overall_conversion_rate < 2:
+
+    priority_actions.append({
+        "Priority": "🟠 MEDIUM",
+        "Area": "Conversion Rate",
+        "Problem": f"Conversion rate is only {overall_conversion_rate:.2f}%",
+        "Action": "Improve landing page relevance and focus on high-intent keywords."
+    })
+
+
+# HIGH CPC
+if overall_cpc > 60:
+
+    priority_actions.append({
+        "Priority": "🟠 MEDIUM",
+        "Area": "CPC",
+        "Problem": f"Average CPC is ₹{overall_cpc:.2f}",
+        "Action": "Review expensive keywords, match types and search terms."
+    })
+
+
+# WASTE SPEND
+if "waste_df" in locals() and not waste_df.empty:
+
+    waste_amount = waste_df["Cost (₹)"].sum()
+
+    if waste_amount > 500:
+
+        priority_actions.append({
+            "Priority": "🔴 HIGH",
+            "Area": "Waste Spend",
+            "Problem": f"₹{waste_amount:,.2f} spent with zero conversions.",
+            "Action": "Review these search terms and add irrelevant terms as negatives."
+        })
+
+
+# GOOD CTR
+if overall_ctr >= 8:
+
+    priority_actions.append({
+        "Priority": "🟢 GOOD",
+        "Area": "CTR",
+        "Problem": f"CTR is strong at {overall_ctr:.2f}%",
+        "Action": "Keep strong ads running and focus on conversion quality."
+    })
+
+
+if priority_actions:
+
+    priority_df = pd.DataFrame(
+        priority_actions
+    )
+
+    priority_order = {
+        "🔴 HIGH": 1,
+        "🟠 MEDIUM": 2,
+        "🟢 GOOD": 3
+    }
+
+    priority_df["Order"] = (
+        priority_df["Priority"]
+        .map(priority_order)
+    )
+
+    priority_df = (
+        priority_df
+        .sort_values("Order")
+        .drop(columns=["Order"])
+    )
+
+    st.dataframe(
+        priority_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.success(
+        "🟢 No major actions required right now."
+    ) 
 st.divider()
 # ==================================================
 # ASK AI
