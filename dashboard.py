@@ -1482,137 +1482,151 @@ else:
 st.divider()
 st.header("📊 Before vs After Performance")
 
-if "daily_df" in locals() and not daily_df.empty and len(daily_df) >= 2:
+if "daily_df" in locals() and not daily_df.empty:
 
-    compare_df = daily_df.reset_index().copy()
-    compare_df = compare_df.sort_values("Date")
+    compare_df = daily_df.copy()
 
-    middle = len(compare_df) // 2
+    if "Date" not in compare_df.columns:
+        compare_df = compare_df.reset_index()
 
-       before_df = compare_df.iloc[:middle]
-    after_df = compare_df.iloc[middle:]
+    if "Date" not in compare_df.columns:
+        compare_df = compare_df.rename(
+            columns={compare_df.columns[0]: "Date"}
+        )
 
-    before_start = pd.to_datetime(
-        before_df["Date"].iloc[0]
-    ).strftime("%d %b %Y")
-
-    before_end = pd.to_datetime(
-        before_df["Date"].iloc[-1]
-    ).strftime("%d %b %Y")
-
-    after_start = pd.to_datetime(
-        after_df["Date"].iloc[0]
-    ).strftime("%d %b %Y")
-
-    after_end = pd.to_datetime(
-        after_df["Date"].iloc[-1]
-    ).strftime("%d %b %Y")
-
-    st.caption(
-        f"📅 Before: {before_start} → {before_end} | "
-        f"After: {after_start} → {after_end}"
+    compare_df["Date"] = pd.to_datetime(
+        compare_df["Date"],
+        errors="coerce"
     )
 
-    def period_summary(data):
-
-        impressions = data["Impressions"].sum()
-        clicks = data["Clicks"].sum()
-        cost = data["Cost"].sum()
-        conversions = data["Conversions"].sum()
-
-        ctr = (
-            clicks / impressions * 100
-            if impressions > 0 else 0
-        )
-
-        cpc = (
-            cost / clicks
-            if clicks > 0 else 0
-        )
-
-        cpa = (
-            cost / conversions
-            if conversions > 0 else 0
-        )
-
-        conversion_rate = (
-            conversions / clicks * 100
-            if clicks > 0 else 0
-        )
-
-        return {
-            "Impressions": impressions,
-            "Clicks": clicks,
-            "Cost": cost,
-            "Conversions": conversions,
-            "CTR": ctr,
-            "CPC": cpc,
-            "CPA": cpa,
-            "Conversion Rate": conversion_rate
-        }
-
-    before = period_summary(before_df)
-    after = period_summary(after_df)
-
-    comparison_data = pd.DataFrame({
-        "Metric": [
-            "Impressions",
-            "Clicks",
-            "Cost (₹)",
-            "Conversions",
-            "CTR (%)",
-            "Avg CPC (₹)",
-            "CPA (₹)",
-            "Conversion Rate (%)"
-        ],
-
-        "Before": [
-            round(before["Impressions"], 0),
-            round(before["Clicks"], 0),
-            round(before["Cost"], 2),
-            round(before["Conversions"], 2),
-            round(before["CTR"], 2),
-            round(before["CPC"], 2),
-            round(before["CPA"], 2),
-            round(before["Conversion Rate"], 2)
-        ],
-
-        "After": [
-            round(after["Impressions"], 0),
-            round(after["Clicks"], 0),
-            round(after["Cost"], 2),
-            round(after["Conversions"], 2),
-            round(after["CTR"], 2),
-            round(after["CPC"], 2),
-            round(after["CPA"], 2),
-            round(after["Conversion Rate"], 2)
-        ]
-    })
-
-    st.dataframe(
-        comparison_data,
-        use_container_width=True,
-        hide_index=True
+    compare_df = (
+        compare_df
+        .dropna(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
     )
 
-    if st.button(
-        "🤖 Analyze Before vs After",
-        key="before_after_ai_button"
-    ):
+    if len(compare_df) >= 2:
 
-        comparison_prompt = f"""
+        middle = len(compare_df) // 2
+
+        before_df = compare_df.iloc[:middle].copy()
+        after_df = compare_df.iloc[middle:].copy()
+
+        before_start = before_df["Date"].iloc[0].strftime("%d %b %Y")
+        before_end = before_df["Date"].iloc[-1].strftime("%d %b %Y")
+
+        after_start = after_df["Date"].iloc[0].strftime("%d %b %Y")
+        after_end = after_df["Date"].iloc[-1].strftime("%d %b %Y")
+
+        st.caption(
+            f"📅 Before: {before_start} → {before_end} | "
+            f"After: {after_start} → {after_end}"
+        )
+
+        def period_summary(data):
+
+            impressions = float(data["Impressions"].sum())
+            clicks = float(data["Clicks"].sum())
+            cost = float(data["Cost"].sum())
+            conversions = float(data["Conversions"].sum())
+
+            ctr = (
+                clicks / impressions * 100
+                if impressions > 0
+                else 0
+            )
+
+            cpc = (
+                cost / clicks
+                if clicks > 0
+                else 0
+            )
+
+            cpa = (
+                cost / conversions
+                if conversions > 0
+                else 0
+            )
+
+            conversion_rate = (
+                conversions / clicks * 100
+                if clicks > 0
+                else 0
+            )
+
+            return {
+                "Impressions": impressions,
+                "Clicks": clicks,
+                "Cost": cost,
+                "Conversions": conversions,
+                "CTR": ctr,
+                "CPC": cpc,
+                "CPA": cpa,
+                "Conversion Rate": conversion_rate
+            }
+
+        before = period_summary(before_df)
+        after = period_summary(after_df)
+
+        comparison_data = pd.DataFrame({
+            "Metric": [
+                "Impressions",
+                "Clicks",
+                "Cost (₹)",
+                "Conversions",
+                "CTR (%)",
+                "Avg CPC (₹)",
+                "CPA (₹)",
+                "Conversion Rate (%)"
+            ],
+            "Before": [
+                round(before["Impressions"], 0),
+                round(before["Clicks"], 0),
+                round(before["Cost"], 2),
+                round(before["Conversions"], 2),
+                round(before["CTR"], 2),
+                round(before["CPC"], 2),
+                round(before["CPA"], 2),
+                round(before["Conversion Rate"], 2)
+            ],
+            "After": [
+                round(after["Impressions"], 0),
+                round(after["Clicks"], 0),
+                round(after["Cost"], 2),
+                round(after["Conversions"], 2),
+                round(after["CTR"], 2),
+                round(after["CPC"], 2),
+                round(after["CPA"], 2),
+                round(after["Conversion Rate"], 2)
+            ]
+        })
+
+        st.dataframe(
+            comparison_data,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        if st.button(
+            "🤖 Analyze Before vs After",
+            key="before_after_ai_button"
+        ):
+
+            comparison_prompt = f"""
 You are a senior Google Ads performance analyst.
 
-Compare the following BEFORE and AFTER performance.
+BEFORE PERIOD:
+{before_start} to {before_end}
 
-BEFORE:
 {before}
 
-AFTER:
+AFTER PERIOD:
+{after_start} to {after_end}
+
 {after}
 
 Explain:
-
 1. What improved
 2. What became worse
 3. Spend change
@@ -1621,35 +1635,41 @@ Explain:
 6. CPC change
 7. Conversion change
 8. CPA change
-9. Whether the latest changes are working
+9. Whether performance improved
 10. Top 5 actions to take next
 
-Keep the analysis practical for a home care services Google Ads account.
+Be practical and concise.
 """
 
-        with st.spinner(
-            "AI is comparing performance..."
-        ):
+            with st.spinner(
+                "AI is comparing performance..."
+            ):
 
-            comparison_ai_response = (
-                openai_client.responses.create(
-                    model="gpt-5.4-mini",
-                    input=comparison_prompt
+                comparison_ai_response = (
+                    openai_client.responses.create(
+                        model="gpt-5.4-mini",
+                        input=comparison_prompt
+                    )
                 )
+
+            st.subheader(
+                "🤖 Before vs After AI Analysis"
             )
 
-        st.subheader(
-            "🤖 Before vs After AI Analysis"
-        )
+            st.write(
+                comparison_ai_response.output_text
+            )
 
-        st.write(
-            comparison_ai_response.output_text
+    else:
+
+        st.info(
+            "Not enough daily data to create a Before vs After comparison."
         )
 
 else:
 
     st.info(
-        "Select Last 7 Days or Last 30 Days to compare performance."
+        "Daily performance data is not available."
     )
    # ==================================================
 # AI PRIORITY ACTION CENTER
