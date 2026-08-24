@@ -9,11 +9,11 @@ from openai import OpenAI
 # PAGE SETTINGS
 # ==================================================
 
-
 st.set_page_config(
     page_title="Google Ads AI Dashboard",
     layout="wide"
 )
+
 st.markdown("""
 <style>
 
