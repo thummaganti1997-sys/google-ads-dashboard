@@ -307,10 +307,12 @@ date_option = st.selectbox(
     [
         "Today",
         "Last 7 Days",
-        "Last 30 Days"
+        "Last 30 Days",
+        "Last 90 Days",
+        "Last 6 Months",
+        "Last 1 Year"
     ]
 )
-
 date_range_map = {
     "Today": "TODAY",
     "Last 7 Days": "LAST_7_DAYS",
