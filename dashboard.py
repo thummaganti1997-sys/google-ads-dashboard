@@ -1424,7 +1424,100 @@ else:
 
     st.success(
         "🟢 No major actions required right now."
-    ) 
+    )
+    # ==================================================
+# ONE-CLICK AI DAILY REPORT
+# ==================================================
+
+st.divider()
+st.header("📋 One-Click AI Daily Report")
+
+if st.button(
+    "Generate Today's AI Report",
+    key="daily_ai_report_button"
+):
+
+    waste_amount = 0
+
+    if "waste_df" in locals() and not waste_df.empty:
+        waste_amount = float(
+            waste_df["Cost (₹)"].sum()
+        )
+
+    campaign_summary = (
+        filtered_df.to_string(index=False)
+        if "filtered_df" in locals()
+        else "No campaign data available."
+    )
+
+    priority_summary = (
+        priority_df.to_string(index=False)
+        if "priority_df" in locals()
+        else "No priority action data available."
+    )
+
+    daily_report_prompt = f"""
+You are a senior Google Ads performance manager.
+
+Create a professional daily performance report for a home care services Google Ads account.
+
+ACCOUNT SUMMARY
+
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+Average CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+
+Potential Waste Spend:
+₹{waste_amount:.2f}
+
+CAMPAIGN DATA:
+
+{campaign_summary}
+
+PRIORITY ACTIONS:
+
+{priority_summary}
+
+Create the report with these sections:
+
+1. Executive Summary
+2. What Is Working Well
+3. Main Problems
+4. Waste Spend Findings
+5. Campaigns to Increase or Maintain
+6. Campaigns to Reduce or Review
+7. Keyword/Search Term Actions
+8. Budget Recommendation
+9. Conversion Improvement Actions
+10. Top 5 Actions for Today
+
+Be concise, practical, and action-oriented.
+Do not recommend pausing relevant high-intent keywords only because they have zero conversions.
+"""
+
+    with st.spinner(
+        "AI is preparing today's performance report..."
+    ):
+
+        daily_report_response = (
+            openai_client.responses.create(
+                model="gpt-5.4-mini",
+                input=daily_report_prompt
+            )
+        )
+
+    st.subheader(
+        "🤖 Today's AI Performance Report"
+    )
+
+    st.write(
+        daily_report_response.output_text
+    )
 st.divider()
 # ==================================================
 # ASK AI
