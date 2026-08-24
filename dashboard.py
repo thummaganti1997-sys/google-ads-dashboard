@@ -1045,7 +1045,119 @@ else:
     )
 
 
+# ==================================================
+# AI NEGATIVE KEYWORD RECOMMENDATIONS
+# ==================================================
 
+st.divider()
+st.header("🚫 AI Negative Keyword Recommendations")
+
+if "search_df" in locals() and not search_df.empty:
+
+    negative_candidates = search_df[
+        (search_df["Conversions"] == 0)
+        &
+        (search_df["Cost (₹)"] > 0)
+    ].copy()
+
+    if not negative_candidates.empty:
+
+        negative_candidates = negative_candidates.sort_values(
+            "Cost (₹)",
+            ascending=False
+        )
+
+        st.dataframe(
+            negative_candidates[
+                [
+                    "Search Term",
+                    "Campaign",
+                    "Clicks",
+                    "Cost (₹)",
+                    "Conversions"
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        if st.button(
+            "Generate AI Negative Keyword Suggestions",
+            key="negative_keyword_ai_button"
+        ):
+
+            negative_context = negative_candidates.head(
+                30
+            ).to_string(index=False)
+
+            negative_prompt = f"""
+You are a senior Google Ads search-term optimization specialist.
+
+Business:
+Home care services.
+
+Search terms with spend and zero conversions:
+
+{negative_context}
+
+Analyze carefully.
+
+For each relevant search term, decide:
+
+1. KEEP
+2. REVIEW
+3. ADD AS NEGATIVE
+
+Return a clear table with:
+
+Search Term
+Spend
+Clicks
+Recommended Action
+Suggested Negative Keyword
+Suggested Match Type
+Reason
+Priority
+
+Important rules:
+
+- Do not recommend negative keywords only because they have zero conversions.
+- Protect high-intent home care, patient care, nursing care, elderly care and caretaker searches.
+- Recommend negatives mainly for irrelevant intent such as jobs, salary, course, training, free, hospital-only intent, unrelated locations, directories, competitors, informational searches, or unrelated services.
+- Avoid blocking valuable customer searches.
+- Clearly explain why each term should or should not be blocked.
+"""
+
+            with st.spinner(
+                "AI is checking negative keyword opportunities..."
+            ):
+
+                negative_ai_response = (
+                    openai_client.responses.create(
+                        model="gpt-5.4-mini",
+                        input=negative_prompt
+                    )
+                )
+
+            st.subheader(
+                "🤖 AI Negative Keyword Analysis"
+            )
+
+            st.write(
+                negative_ai_response.output_text
+            )
+
+    else:
+
+        st.success(
+            "No zero-conversion search terms with spend found."
+        )
+
+else:
+
+    st.info(
+        "Search term data is not available."
+    )
 st.divider()
 # ==================================================
 # ASK AI
