@@ -51,6 +51,39 @@ h3 {
     border: 1px solid #e5e7eb;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
+/* INDIVIDUAL KPI CARD COLORS */
+
+div[data-testid="stMetric"]:nth-of-type(1) {
+    border-top: 4px solid #2563eb;
+}
+
+div[data-testid="stMetric"]:nth-of-type(2) {
+    border-top: 4px solid #16a34a;
+}
+
+div[data-testid="stMetric"]:nth-of-type(3) {
+    border-top: 4px solid #f59e0b;
+}
+
+div[data-testid="stMetric"]:nth-of-type(4) {
+    border-top: 4px solid #7c3aed;
+}
+
+div[data-testid="stMetric"]:nth-of-type(5) {
+    border-top: 4px solid #0891b2;
+}
+
+div[data-testid="stMetric"]:nth-of-type(6) {
+    border-top: 4px solid #ea580c;
+}
+
+div[data-testid="stMetric"]:nth-of-type(7) {
+    border-top: 4px solid #dc2626;
+}
+
+div[data-testid="stMetric"]:nth-of-type(8) {
+    border-top: 4px solid #0f766e;
+}
 
 /* METRIC LABEL */
 [data-testid="stMetricLabel"] {
