@@ -42,6 +42,18 @@ h2 {
 h3 {
     color: #4338ca;
 }
+/* PROFESSIONAL SECTION HEADINGS */
+h2 {
+    background: linear-gradient(
+        90deg,
+        rgba(79, 70, 229, 0.10),
+        rgba(124, 58, 237, 0.04)
+    );
+    padding: 12px 16px;
+    border-left: 5px solid #4f46e5;
+    border-radius: 10px;
+    margin-top: 20px;
+}
 
 /* METRIC CARDS */
 [data-testid="stMetric"] {
