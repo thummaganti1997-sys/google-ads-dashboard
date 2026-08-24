@@ -11,8 +11,134 @@ from openai import OpenAI
 
 st.set_page_config(
     page_title="Google Ads AI Dashboard",
+    layout="wide"D
+)
+st.set_page_config(
+    page_title="Google Ads AI Dashboard",
     layout="wide"
 )
+st.markdown("""
+<style>
+
+/* MAIN BACKGROUND */
+.stApp {
+    background: linear-gradient(
+        135deg,
+        #f8fbff 0%,
+        #f4f7ff 50%,
+        #faf7ff 100%
+    );
+}
+
+/* MAIN TITLE */
+h1 {
+    color: #1e3a8a;
+    font-weight: 800;
+}
+
+/* SECTION HEADINGS */
+h2 {
+    color: #312e81;
+    font-weight: 700;
+}
+
+h3 {
+    color: #4338ca;
+}
+
+/* METRIC CARDS */
+[data-testid="stMetric"] {
+    background: white;
+    border-radius: 16px;
+    padding: 18px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+/* METRIC LABEL */
+[data-testid="stMetricLabel"] {
+    color: #475569;
+    font-weight: 600;
+}
+
+/* METRIC VALUE */
+[data-testid="stMetricValue"] {
+    color: #111827;
+    font-weight: 800;
+}
+
+/* BUTTONS */
+.stButton > button {
+    background: linear-gradient(
+        90deg,
+        #4f46e5,
+        #7c3aed
+    );
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 22px;
+    font-weight: 700;
+}
+
+.stButton > button:hover {
+    background: linear-gradient(
+        90deg,
+        #4338ca,
+        #6d28d9
+    );
+    color: white;
+}
+
+/* INPUT BOX */
+.stTextInput input {
+    border-radius: 10px;
+    border: 1px solid #c7d2fe;
+}
+
+/* SELECT BOX */
+[data-baseweb="select"] > div {
+    border-radius: 10px;
+}
+
+/* DATAFRAME */
+[data-testid="stDataFrame"] {
+    background: white;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+}
+
+/* ALERT BOXES */
+[data-testid="stAlert"] {
+    border-radius: 12px;
+}
+
+/* DIVIDER */
+hr {
+    border: none;
+    height: 1px;
+    background: #dbeafe;
+    margin-top: 28px;
+    margin-bottom: 28px;
+}
+
+/* SIDEBAR */
+[data-testid="stSidebar"] {
+    background: linear-gradient(
+        180deg,
+        #172554,
+        #312e81
+    );
+}
+
+/* SIDEBAR TEXT */
+[data-testid="stSidebar"] * {
+    color: white;
+}
+
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🤖 Google Ads AI Dashboard")
 
