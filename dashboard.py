@@ -1784,11 +1784,11 @@ else:
     )
  
 # ==================================================
-# ONE-CLICK AI DAILY REPORT
+# # ONE-CLICK AI PERFORMANCE REPORT
 # ==================================================
 
 st.divider()
-st.header("📋 One-Click AI Daily Report")
+st.header("📋 One-Click AI Performance Report")
 
 if date_option == "Today":
     report_period = "Today's"
