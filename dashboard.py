@@ -220,7 +220,32 @@ hr {
 [data-testid="stSidebar"] * {
     color: white;
 }
+/* DASHBOARD TOP BANNER */
+.dashboard-banner {
+    background: linear-gradient(
+        90deg,
+        #1e3a8a,
+        #4f46e5,
+        #7c3aed
+    );
+    padding: 24px 28px;
+    border-radius: 18px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.20);
+}
 
+.dashboard-banner h1 {
+    color: white !important;
+    margin: 0;
+    font-weight: 800;
+}
+
+.dashboard-banner p {
+    color: #e0e7ff;
+    margin-top: 7px;
+    margin-bottom: 0;
+    font-size: 16px;
+}
 </style>
 """, unsafe_allow_html=True)
 
