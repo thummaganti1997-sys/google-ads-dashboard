@@ -346,7 +346,8 @@ elif date_option == "Last 1 Year":
         f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
         f"AND '{today:%Y-%m-%d}'"
     )
-    elif date_option == "Custom Date Range":
+
+elif date_option == "Custom Date Range":
     custom_dates = st.date_input(
         "Select Start and End Date",
         value=(today - timedelta(days=30), today),
