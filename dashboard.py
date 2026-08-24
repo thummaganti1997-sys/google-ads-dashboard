@@ -11,7 +11,7 @@ from openai import OpenAI
 
 st.set_page_config(
     page_title="Google Ads AI Dashboard",
-    layout="wide"D
+    layout="wide"
 )
 st.set_page_config(
     page_title="Google Ads AI Dashboard",
