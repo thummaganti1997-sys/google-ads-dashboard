@@ -1788,6 +1788,17 @@ else:
 
 st.divider()
 st.header("📋 One-Click AI Daily Report")
+if date_option == "Today":
+    report_period = "Today's"
+
+elif date_option == "Custom Date Range":
+    report_period = (
+        f"{start_date.strftime('%d %b %Y')} → "
+        f"{end_date.strftime('%d %b %Y')}"
+    )
+
+else:
+    report_period = date_option
 
 if st.button(
     "Generate Today's AI Report",
@@ -1868,9 +1879,7 @@ Do not recommend pausing relevant high-intent keywords only because they have ze
             )
         )
 
-    st.subheader(
-        "🤖 Today's AI Performance Report"
-    )
+   st.subheader(f"🤖 {report_period} AI Performance Report")
 
     st.write(
         daily_report_response.output_text
