@@ -352,7 +352,8 @@ try:
             metrics.cost_micros,
             metrics.conversions
         FROM campaign
-        WHERE segments.date DURING {date_range}
+       WHERE {date_filter_clause}
+        
         ORDER BY metrics.cost_micros DESC
     """
 
@@ -612,7 +613,7 @@ try:
                 metrics.cost_micros,
                 metrics.conversions
             FROM search_term_view
-            WHERE segments.date DURING {date_range}
+           WHERE {date_filter_clause}
             ORDER BY metrics.cost_micros DESC
             LIMIT 100
         """
