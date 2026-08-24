@@ -150,6 +150,22 @@ div[data-testid="stMetric"]:nth-of-type(8) {
     overflow: hidden;
     border: 1px solid #e5e7eb;
 }
+/* PROFESSIONAL CHART CARDS */
+[data-testid="stVegaLiteChart"],
+[data-testid="stPlotlyChart"] {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+}
+
+/* CHART SPACING */
+[data-testid="stVegaLiteChart"],
+[data-testid="stPlotlyChart"] {
+    margin-top: 8px;
+    margin-bottom: 18px;
+}
 
 /* ALERT BOXES */
 [data-testid="stAlert"] {
