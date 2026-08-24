@@ -309,8 +309,10 @@ date_option = st.selectbox(
         "Last 7 Days",
         "Last 30 Days",
         "Last 90 Days",
-        "Last 6 Months",
-        "Last 1 Year"
+       "Last 6 Months",
+        "Last 1 Year",
+       "Custom Date Range"
+        
     ]
 )
 today = date.today()
@@ -344,6 +346,23 @@ elif date_option == "Last 1 Year":
         f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
         f"AND '{today:%Y-%m-%d}'"
     )
+    elif date_option == "Custom Date Range":
+    custom_dates = st.date_input(
+        "Select Start and End Date",
+        value=(today - timedelta(days=30), today),
+        max_value=today
+    )
+
+    if len(custom_dates) == 2:
+        start_date, end_date = custom_dates
+
+        date_filter_clause = (
+            f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
+            f"AND '{end_date:%Y-%m-%d}'"
+        )
+    else:
+        st.warning("Please select both start and end dates.")
+        st.stop()
 # ==================================================
 # GOOGLE ADS CONNECTION
 # ==================================================
