@@ -1489,18 +1489,29 @@ if "daily_df" in locals() and not daily_df.empty and len(daily_df) >= 2:
 
     middle = len(compare_df) // 2
 
-    before_df = compare_df.iloc[:middle]
+       before_df = compare_df.iloc[:middle]
     after_df = compare_df.iloc[middle:]
-    before_start = pd.to_datetime(before_df["Date"].iloc[0]).strftime("%d %b %Y")
-before_end = pd.to_datetime(before_df["Date"].iloc[-1]).strftime("%d %b %Y")
 
-after_start = pd.to_datetime(after_df["Date"].iloc[0]).strftime("%d %b %Y")
-after_end = pd.to_datetime(after_df["Date"].iloc[-1]).strftime("%d %b %Y")
+    before_start = pd.to_datetime(
+        before_df["Date"].iloc[0]
+    ).strftime("%d %b %Y")
 
-st.caption(
-    f"📅 Before: {before_start} → {before_end}   |   "
-    f"After: {after_start} → {after_end}"
-)
+    before_end = pd.to_datetime(
+        before_df["Date"].iloc[-1]
+    ).strftime("%d %b %Y")
+
+    after_start = pd.to_datetime(
+        after_df["Date"].iloc[0]
+    ).strftime("%d %b %Y")
+
+    after_end = pd.to_datetime(
+        after_df["Date"].iloc[-1]
+    ).strftime("%d %b %Y")
+
+    st.caption(
+        f"📅 Before: {before_start} → {before_end} | "
+        f"After: {after_start} → {after_end}"
+    )
 
     def period_summary(data):
 
