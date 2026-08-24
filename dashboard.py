@@ -1791,6 +1791,57 @@ Do not recommend pausing relevant high-intent keywords only because they have ze
     )
 st.divider()
 # ==================================================
+# FINAL AI RECOMMENDATIONS SUMMARY
+# ==================================================
+
+st.divider()
+st.header("📌 Final AI Recommendations Summary")
+
+summary_actions = []
+
+if total_conversions == 0:
+    summary_actions.append(
+        "🔴 Check conversion tracking and landing page immediately."
+    )
+
+if overall_cpc > 60:
+    summary_actions.append(
+        f"🟠 Avg CPC is high at ₹{overall_cpc:.2f}. Review expensive keywords."
+    )
+
+if overall_cpa > 2000 and total_conversions > 0:
+    summary_actions.append(
+        f"🔴 CPA is high at ₹{overall_cpa:.2f}. Reduce waste and optimize targeting."
+    )
+
+if "waste_df" in locals() and not waste_df.empty:
+    waste_amount = waste_df["Cost (₹)"].sum()
+
+    summary_actions.append(
+        f"🔴 Review ₹{waste_amount:,.2f} potential waste spend."
+    )
+
+if overall_ctr >= 8:
+    summary_actions.append(
+        f"🟢 CTR is strong at {overall_ctr:.2f}%. Keep high-performing ads running."
+    )
+
+if summary_actions:
+
+    for i, action in enumerate(
+        summary_actions[:5],
+        start=1
+    ):
+        st.write(
+            f"**{i}. {action}**"
+        )
+
+else:
+
+    st.success(
+        "🟢 Account performance looks stable. Continue monitoring."
+    )
+# ==================================================
 # ASK AI
 # ==================================================
 
