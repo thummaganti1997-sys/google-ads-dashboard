@@ -1971,8 +1971,14 @@ else:
 # ==================================================
 # ASK AI
 # ==================================================
-
+# Initialize AI chat history
+if "ai_chat_history" not in st.session_state:
+    st.session_state.ai_chat_history = []
 st.header("🤖 Ask AI About Your Campaign")
+# Show previous AI conversation
+for message in st.session_state.ai_chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 question = st.text_input(
     "Ask a question about your campaigns",
@@ -1982,9 +1988,30 @@ question = st.text_input(
 if st.button("Analyze with AI"):
 
     if question:
+   st.session_state.ai_chat_history.append(
+    {"role": "user", "content": question}
+)     
 
         prompt = f"""
 You are a professional Google Ads expert.
+IMPORTANT LANGUAGE RULES:
+- Detect the language used in the user's question.
+- If the question is in Telugu, answer completely in Telugu.
+- If the question is in English, answer in English.
+- If the question mixes Telugu and English, reply naturally in the same mixed style.
+- Keep Google Ads technical terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
+
+RESPONSE STYLE:
+- Act like a personal Google Ads AI analyst.
+- Answer the user's exact question first.
+- Use the campaign data provided below.
+- When comparing performance, show a clear Before vs After table when possible.
+- For search term questions, identify irrelevant terms and suggest negative keywords.
+- Show important amounts in ₹.
+- Highlight changes in CTR, CPC, CPA, Cost and Conversions.
+- Clearly explain what improved and what became worse.
+- Finish with 3 practical actions the user should take next.
+- Never invent campaign data that is not provided.
 
 Campaign data:
 
@@ -2003,7 +2030,7 @@ Conversion Rate: {overall_conversion_rate:.2f}%
 
 User question:
 {question}
-
+Answer the USER QUESTION using the Google Ads data above.
 Give:
 1. Clear analysis
 2. Problems
@@ -2019,12 +2046,17 @@ Be practical and concise.
                 model="gpt-5.4-mini",
                 input=prompt
             )
+    st.session_state.ai_chat_history.append(
+    {"role": "assistant", "content": ai_response.output_text}
+)        
 
-        st.subheader("🤖 AI Analysis")
+        st.markdown("### 🤖 Google Ads AI")
 
-        st.write(
-            ai_response.output_text
-        )
+with st.chat_message("user"):
+    st.markdown(question)
+
+with st.chat_message("assistant"):
+    st.markdown(ai_response.output_text)
 
     else:
 
