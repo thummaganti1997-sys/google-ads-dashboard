@@ -341,22 +341,38 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==================================================
-# DATE FILTER
+# DATE RANGE
 # ==================================================
+
+date_options = [
+    "Today",
+    "Last 7 Days",
+    "Last 30 Days",
+    "Last 90 Days",
+    "Last 6 Months",
+    "Last 1 Year",
+    "Custom Date Range"
+]
+
+# Default date range
+if "date_option" not in st.session_state:
+    st.session_state.date_option = "Today"
+
+# AI requested date range varsa, apply it before creating widget
+if "pending_ai_date_option" in st.session_state:
+    pending_date = st.session_state.pending_ai_date_option
+
+    if pending_date in date_options:
+        st.session_state.date_option = pending_date
+
+    del st.session_state.pending_ai_date_option
 
 date_option = st.selectbox(
     "📅 Select Date Range",
-    [
-        "Today",
-        "Last 7 Days",
-        "Last 30 Days",
-        "Last 90 Days",
-       "Last 6 Months",
-        "Last 1 Year",
-       "Custom Date Range"
-        
-    ]
+    date_options,
+    key="date_option"
 )
+
 today = date.today()
 
 if date_option == "Today":
@@ -370,6 +386,7 @@ elif date_option == "Last 30 Days":
 
 elif date_option == "Last 90 Days":
     start_date = today - timedelta(days=89)
+
     date_filter_clause = (
         f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
         f"AND '{today:%Y-%m-%d}'"
@@ -377,6 +394,7 @@ elif date_option == "Last 90 Days":
 
 elif date_option == "Last 6 Months":
     start_date = today - timedelta(days=179)
+
     date_filter_clause = (
         f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
         f"AND '{today:%Y-%m-%d}'"
@@ -384,6 +402,7 @@ elif date_option == "Last 6 Months":
 
 elif date_option == "Last 1 Year":
     start_date = today - timedelta(days=364)
+
     date_filter_clause = (
         f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
         f"AND '{today:%Y-%m-%d}'"
@@ -396,13 +415,18 @@ elif date_option == "Custom Date Range":
         max_value=today
     )
 
-    if len(custom_dates) == 2:
+    if isinstance(custom_dates, (tuple, list)) and len(custom_dates) == 2:
         start_date, end_date = custom_dates
+
+        if start_date > end_date:
+            st.error("Start date cannot be after end date.")
+            st.stop()
 
         date_filter_clause = (
             f"segments.date BETWEEN '{start_date:%Y-%m-%d}' "
             f"AND '{end_date:%Y-%m-%d}'"
         )
+
     else:
         st.warning("Please select both start and end dates.")
         st.stop()
