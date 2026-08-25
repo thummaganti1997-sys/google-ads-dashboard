@@ -2122,14 +2122,22 @@ IMPORTANT DATA RULES:
 - Only use the BEFORE VS AFTER DATA when making a Before vs After comparison.
 
 NEGATIVE KEYWORD RULES:
-- For a negative keyword question, use ONLY terms that actually appear in SEARCH TERMS DATA.
-- Do not use campaign names as negative keywords.
-- Do not provide generic example negatives.
-- Prefer search terms with spend and zero conversions when identifying waste.
-- Quote the actual search term whenever recommending it.
-- If no search term can safely be confirmed as irrelevant, say so.
-- Do not recommend a term merely because it has zero conversions if its intent could still be relevant.
-- Explain the reason for every negative keyword recommendation.
+- For negative keyword questions, use ONLY actual terms from SEARCH TERMS DATA.
+- Never invent search terms or negative keywords.
+- Never recommend a search term with Conversions greater than 0 as a negative keyword.
+- Zero conversions alone is NOT enough reason to make a term negative.
+- Use the Campaign column to understand which campaign generated each search term.
+- If a search term is relevant to another service or campaign, label it REVIEW / MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
+- Do not automatically negative core service-intent terms such as home care, patient care, elderly care, nursing care, baby care, babysitter, caretaker, or caregiver.
+- Recommend ADD AS NEGATIVE only when the search intent is clearly irrelevant to the advertiser's service/campaign.
+- Put uncertain terms under REVIEW, not ADD AS NEGATIVE.
+- Put relevant high-intent terms under KEEP.
+- Prefer high-spend, zero-conversion, clearly irrelevant terms first.
+- Explain the reason and show Cost and Conversions for every recommendation.
+- Return negative keyword analysis in 3 sections:
+  1. ADD AS NEGATIVE
+  2. REVIEW
+  3. KEEP
 
 RESPONSE STYLE:
 - Answer the user's exact question first.
