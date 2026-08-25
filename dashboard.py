@@ -1958,6 +1958,7 @@ else:
     st.success(
         "🟢 Account performance looks stable. Continue monitoring."
     )
+    )
 
 # ==================================================
 # ASK AI
