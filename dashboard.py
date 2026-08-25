@@ -2423,19 +2423,3 @@ Answer the USER QUESTION using only the supplied data.
 
     else:
         st.warning("Please enter a question.")
-        if summary_actions:
-
-    for i, action in enumerate(
-        summary_actions[:5],
-        start=1
-    ):
-
-        st.write(
-            f"**{i}. {action}**"
-        )
-
-else:
-
-    st.success(
-        "🟢 Account performance looks stable. Continue monitoring."
-    )
