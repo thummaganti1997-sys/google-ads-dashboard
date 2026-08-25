@@ -2012,11 +2012,17 @@ RESPONSE STYLE:
 - Clearly explain what improved and what became worse.
 - Finish with 3 practical actions the user should take next.
 - Never invent campaign data that is not provided.
+- Answer only for the selected date range unless the user explicitly asks for another period.
+- Do not claim a Before vs After comparison unless actual before-period and after-period data are provided.
 
 Campaign data:
 
 {filtered_df.to_string(index=False)}
+SELECTED DATE RANGE:
+{date_option}
 
+DATE FILTER USED:
+{date_filter_clause}
 Overall metrics:
 
 Impressions: {total_impressions}
