@@ -2162,7 +2162,13 @@ NEGATIVE KEYWORD RULES:
 - If a search term belongs to another service offered by the advertiser, classify it as MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
 - Only classify a term as ADD AS NEGATIVE when its intent is clearly outside all services offered by the advertiser.
 - If a term has conversions greater than 0, never recommend it as a negative keyword.
-
+- Treat caretaker, caregiver, home care, patient care, elderly care, nursing care, baby care and babysitter agency/service intent as relevant offered-service intent.
+- Terms such as "caretaker agency", "caregiver agency", "patient care agency" and similar service-provider searches must not be ADD AS NEGATIVE solely because they contain the word agency.
+- Terms such as ICU care at home, dressing nurse, bedside care and medical support at home must be REVIEW or MOVE TO CORRECT CAMPAIGN unless clearly outside the advertiser's services.
+- Normalize duplicate Search Terms before classifying them.
+- A Search Term must appear in only ONE final section.
+- If duplicate rows for the same Search Term have any Conversions greater than 0, do not classify that Search Term as ADD AS NEGATIVE.
+- Classification priority is: KEEP if it converted and is relevant; MOVE TO CORRECT CAMPAIGN if it belongs to another offered service; REVIEW if uncertain; ADD AS NEGATIVE only if clearly irrelevant.
 RESPONSE STYLE:
 - Answer the user's exact question first.
 - Be practical and concise.
