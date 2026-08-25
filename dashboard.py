@@ -2033,15 +2033,8 @@ if st.button(
 ):
 
     if question:
-if st.button(
-    "Analyze with AI",
-    key="ask_ai_analyze_button"
-):
-
-    if question:
 
         question_lower = question.lower()
-
         requested_date_option = None
 
         if any(
@@ -2120,17 +2113,10 @@ if st.button(
                 "content": question
             }
         )
-        st.session_state.ai_chat_history.append(
-            {
-                "role": "user",
-                "content": question
-            }
-        )
 
         # ------------------------------------------
         # SEARCH TERMS CONTEXT
         # ------------------------------------------
-
         if "search_df" in locals() and not search_df.empty:
             search_terms_context = (
                 search_df
