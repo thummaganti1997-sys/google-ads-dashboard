@@ -2134,10 +2134,29 @@ NEGATIVE KEYWORD RULES:
 - Put relevant high-intent terms under KEEP.
 - Prefer high-spend, zero-conversion, clearly irrelevant terms first.
 - Explain the reason and show Cost and Conversions for every recommendation.
-- Return negative keyword analysis in 3 sections:
+- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
+- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
+- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
+- Return negative keyword analysis in exactly 4 sections:
   1. ADD AS NEGATIVE
-  2. REVIEW
-  3. KEEP
+  2. MOVE TO CORRECT CAMPAIGN
+  3. REVIEW
+  4. KEEP
+- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
+- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
+- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
+- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
+- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
+- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
+- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
+- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
+- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
+- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
+- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
+- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
+- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
+- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
+- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
   - The advertiser offers Home Care, Patient Care, Elderly Care, Nursing Care, Baby Care/Babysitter and Caretaker services.
 - Never recommend an offered service category as an account-level negative keyword.
 - If a search term belongs to another service offered by the advertiser, classify it as MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
