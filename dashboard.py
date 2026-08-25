@@ -2332,6 +2332,8 @@ NEGATIVE KEYWORD RULES:
 - Never show the same Search Term more than once.
 - Duplicate Search Terms have been combined where possible.
 - A Search Term can appear in only ONE final category.
+- Doctor-at-home / doctor visit intent is outside the advertiser's listed services and may be ADD AS NEGATIVE when clearly doctor-service intent.
+- Old-age-home / residential facility intent is different from Elderly Care at Home and may be ADD AS NEGATIVE when clearly facility intent.
 
 Classification priority:
 1. KEEP if relevant and converted
@@ -2353,6 +2355,9 @@ RESPONSE STYLE:
 - Highlight CTR, CPC, CPA, Cost and Conversions where relevant.
 - Explain problems clearly.
 - Finish with 3 priority actions.
+- Show the 4-section negative keyword analysis ONLY when the USER QUESTION specifically asks about negative keywords or search-term classification.
+- For general performance questions, do NOT include ADD AS NEGATIVE / MOVE TO CORRECT CAMPAIGN / REVIEW / KEEP sections.
+- For general performance questions, focus on Overall Performance, Campaign Performance, Key Problems, Opportunities and 3 Priority Actions.
 
 SELECTED DATE RANGE:
 {date_option}
