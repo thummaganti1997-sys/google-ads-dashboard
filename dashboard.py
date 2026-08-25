@@ -1951,7 +1951,254 @@ if overall_ctr >= 8:
     summary_actions.append(
         f"🟢 CTR is strong at {overall_ctr:.2f}%. Keep high-performing ads running."
     )
+# ==================================================
+# ASK AI
+# ==================================================
 
+st.divider()
+st.header("🤖 Ask AI About Your Campaign")
+
+# ------------------------------------------
+# CHAT HISTORY
+# ------------------------------------------
+
+if "ai_chat_history" not in st.session_state:
+    st.session_state.ai_chat_history = []
+
+# Create a key for the currently selected date period
+if date_option == "Custom Date Range":
+    current_ai_period = (
+        f"{date_option}:"
+        f"{start_date:%Y-%m-%d}:"
+        f"{end_date:%Y-%m-%d}"
+    )
+else:
+    current_ai_period = date_option
+
+# Automatically clear old chat when date range changes
+if "ai_chat_period" not in st.session_state:
+    st.session_state.ai_chat_period = current_ai_period
+
+elif st.session_state.ai_chat_period != current_ai_period:
+    st.session_state.ai_chat_history = []
+    st.session_state.ai_chat_period = current_ai_period
+
+# Manual clear button
+if st.button(
+    "🗑️ Clear AI Chat",
+    key="clear_ai_chat_button"
+):
+    st.session_state.ai_chat_history = []
+    st.rerun()
+
+# Show previous conversation
+for message in st.session_state.ai_chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+
+question = st.text_input(
+    "Ask a question about your campaigns",
+    placeholder="Example: negative keywords చెప్పు"
+)
+
+
+if st.button(
+    "Analyze with AI",
+    key="ask_ai_analyze_button"
+):
+
+    if question:
+
+        st.session_state.ai_chat_history.append(
+            {
+                "role": "user",
+                "content": question
+            }
+        )
+
+        # ------------------------------------------
+        # SEARCH TERMS CONTEXT
+        # ------------------------------------------
+
+        if "search_df" in locals() and not search_df.empty:
+            search_terms_context = (
+                search_df
+                .head(100)
+                .to_string(index=False)
+            )
+            search_terms_available = True
+
+        else:
+            search_terms_context = (
+                "No Search Terms data is available "
+                "for the selected date range."
+            )
+            search_terms_available = False
+
+        # ------------------------------------------
+        # BEFORE VS AFTER CONTEXT
+        # ------------------------------------------
+
+        if (
+            "comparison_data" in locals()
+            and not comparison_data.empty
+        ):
+            before_after_context = (
+                comparison_data.to_string(index=False)
+            )
+
+        else:
+            before_after_context = (
+                "No Before vs After comparison data is available."
+            )
+
+        # ------------------------------------------
+        # DETECT NEGATIVE KEYWORD QUESTION
+        # ------------------------------------------
+
+        question_lower = question.lower()
+
+        negative_keyword_question = any(
+            phrase in question_lower
+            for phrase in [
+                "negative keyword",
+                "negative keywords",
+                "నెగటివ్",
+                "నెగెటివ్"
+            ]
+        )
+
+        # ------------------------------------------
+        # NO SEARCH TERMS = DO NOT INVENT NEGATIVES
+        # ------------------------------------------
+
+        if negative_keyword_question and not search_terms_available:
+
+            telugu_question = any(
+                "\u0c00" <= char <= "\u0c7f"
+                for char in question
+            )
+
+            if telugu_question:
+                assistant_text = (
+                    f"Selected date range **{date_option}** లో "
+                    "Search Terms data అందుబాటులో లేదు. "
+                    "కాబట్టి actual data ఆధారంగా negative keywords‌ను "
+                    "confirm చేయలేను. నేను ఊహించి keywords suggest చేయను. "
+                    "Search Terms data ఉన్న date range select చేసి "
+                    "మళ్లీ అడగండి."
+                )
+
+            else:
+                assistant_text = (
+                    f"No Search Terms data is available for "
+                    f"**{date_option}**. I cannot confirm negative "
+                    "keywords without actual search-term data, and I "
+                    "will not invent suggestions. Select a date range "
+                    "with Search Terms data and ask again."
+                )
+
+        else:
+
+            prompt = f"""
+You are a professional Google Ads AI analyst.
+
+IMPORTANT LANGUAGE RULES:
+- Detect the language used in the user's question.
+- If the question is in Telugu, answer in Telugu.
+- If the question is in English, answer in English.
+- If the user mixes Telugu and English, reply naturally in the same style.
+- Keep terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
+
+IMPORTANT DATA RULES:
+- Use only the data provided below.
+- Never invent campaign metrics.
+- Never invent search terms.
+- Never invent negative keywords.
+- The selected date range is the authoritative period for the supplied metrics.
+- If the user asks about a different date period, clearly say that the dashboard is currently set to {date_option} and ask them to select the requested period.
+- Do not present campaign-vs-account data as a Before vs After comparison.
+- Only use the BEFORE VS AFTER DATA when making a Before vs After comparison.
+
+NEGATIVE KEYWORD RULES:
+- For a negative keyword question, use ONLY terms that actually appear in SEARCH TERMS DATA.
+- Do not use campaign names as negative keywords.
+- Do not provide generic example negatives.
+- Prefer search terms with spend and zero conversions when identifying waste.
+- Quote the actual search term whenever recommending it.
+- If no search term can safely be confirmed as irrelevant, say so.
+- Do not recommend a term merely because it has zero conversions if its intent could still be relevant.
+- Explain the reason for every negative keyword recommendation.
+
+RESPONSE STYLE:
+- Answer the user's exact question first.
+- Be practical and concise.
+- Show ₹ values where relevant.
+- Highlight CTR, CPC, CPA, Cost and Conversions when useful.
+- Use tables when they make the answer clearer.
+- Finish with 3 priority actions.
+
+SELECTED DATE RANGE:
+{date_option}
+
+DATE FILTER:
+{date_filter_clause}
+
+CAMPAIGN DATA:
+{filtered_df.to_string(index=False)}
+
+SEARCH TERMS DATA:
+{search_terms_context}
+
+BEFORE VS AFTER DATA:
+{before_after_context}
+
+OVERALL METRICS:
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+
+USER QUESTION:
+{question}
+
+Answer the USER QUESTION using only the supplied data.
+"""
+
+            with st.spinner("AI is analyzing..."):
+
+                ai_response = openai_client.responses.create(
+                    model="gpt-5.4-mini",
+                    input=prompt
+                )
+
+            assistant_text = ai_response.output_text
+
+        # Save assistant response
+        st.session_state.ai_chat_history.append(
+            {
+                "role": "assistant",
+                "content": assistant_text
+            }
+        )
+
+        # Show current question and response immediately
+        st.markdown("### 🤖 Google Ads AI")
+
+        with st.chat_message("user"):
+            st.markdown(question)
+
+        with st.chat_message("assistant"):
+            st.markdown(assistant_text)
+
+    else:
+
+        st.warning("Please enter a question.")
 if summary_actions:
 
     for i, action in enumerate(
@@ -1968,123 +2215,3 @@ else:
     st.success(
         "🟢 Account performance looks stable. Continue monitoring."
     )
-# ==================================================
-# ASK AI
-# ==================================================
-# Initialize AI chat history
-if "ai_chat_history" not in st.session_state:
-    st.session_state.ai_chat_history = []
-st.header("🤖 Ask AI About Your Campaign")
-if st.button("🗑️ Clear AI Chat", key="clear_ai_chat_button"):
-    st.session_state.ai_chat_history = []
-    st.rerun()
-# Show previous AI conversation
-for message in st.session_state.ai_chat_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-question = st.text_input(
-    "Ask a question about your campaigns",
-    placeholder="Example: Why am I getting clicks but no conversions?"
-)
-
-if st.button("Analyze with AI"):
-    if question:
-        st.session_state.ai_chat_history.append(
-            {"role": "user", "content": question}
-        )
-        if "search_df" in locals() and not search_df.empty:
-            search_terms_context = search_df.head(100).to_string(index=False)
-        else:
-            search_terms_context = (
-                "No search term data is available for the selected date range."
-            )
-        prompt = f"""
-You are a professional Google Ads expert.
-
-IMPORTANT LANGUAGE RULES:
-- Detect the language used in the user's question.
-- If the question is in Telugu, answer completely in Telugu.
-- If the question is in English, answer in English.
-- If the question mixes Telugu and English, reply naturally in the same mixed style.
-- Keep Google Ads technical terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
-
-RESPONSE STYLE:
-- Act like a personal Google Ads AI analyst.
-- Answer the user's exact question first.
-- Use the campaign data provided below.
-- When comparing performance, show a clear Before vs After table when possible.
-- For search term questions, identify irrelevant terms and suggest negative keywords.
-- Show important amounts in ₹.
-- Highlight changes in CTR, CPC, CPA, Cost and Conversions.
-- Clearly explain what improved and what became worse.
-- Finish with 3 practical actions the user should take next.
-- Never invent campaign data that is not provided.
-- Answer only for the selected date range unless the user explicitly asks for another period.
-- Do not claim a Before vs After comparison unless actual before-period and after-period data are provided.
-- For negative keyword questions, use only the SEARCH TERMS DATA provided.
-- Never invent negative keywords. If search term data is unavailable, clearly say exact negative keyword recommendations cannot be confirmed.
-Campaign data:
-
-{filtered_df.to_string(index=False)}
-
-SEARCH TERMS DATA:
-
-{search_terms_context}
-
-SELECTED DATE RANGE:
-{date_option}
-
-DATE FILTER USED:
-{date_filter_clause}
-
-Overall metrics:
-
-Impressions: {total_impressions}
-Clicks: {total_clicks}
-Cost: ₹{total_cost:.2f}
-Conversions: {total_conversions:.2f}
-CTR: {overall_ctr:.2f}%
-CPC: ₹{overall_cpc:.2f}
-CPA: ₹{overall_cpa:.2f}
-Conversion Rate: {overall_conversion_rate:.2f}%
-
-User question:
-{question}
-
-Answer the USER QUESTION using the Google Ads data above.
-
-Give:
-1. Clear analysis
-2. Problems
-3. Recommendations
-4. Priority action plan
-
-Be practical and concise.
-"""
-
-        with st.spinner("AI is analyzing..."):
-
-            ai_response = openai_client.responses.create(
-                model="gpt-5.4-mini",
-                input=prompt
-            )
-
-        st.session_state.ai_chat_history.append(
-            {
-                "role": "assistant",
-                "content": ai_response.output_text
-            }
-        )
-
-        st.markdown("### 🤖 Google Ads AI")
-
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        with st.chat_message("assistant"):
-            st.markdown(ai_response.output_text)
-
-    else:
-
-        st.warning("Please enter a question.")
