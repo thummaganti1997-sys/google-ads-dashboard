@@ -2138,6 +2138,11 @@ NEGATIVE KEYWORD RULES:
   1. ADD AS NEGATIVE
   2. REVIEW
   3. KEEP
+  - The advertiser offers Home Care, Patient Care, Elderly Care, Nursing Care, Baby Care/Babysitter and Caretaker services.
+- Never recommend an offered service category as an account-level negative keyword.
+- If a search term belongs to another service offered by the advertiser, classify it as MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
+- Only classify a term as ADD AS NEGATIVE when its intent is clearly outside all services offered by the advertiser.
+- If a term has conversions greater than 0, never recommend it as a negative keyword.
 
 RESPONSE STYLE:
 - Answer the user's exact question first.
