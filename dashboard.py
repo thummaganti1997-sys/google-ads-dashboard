@@ -1986,14 +1986,14 @@ question = st.text_input(
 )
 
 if st.button("Analyze with AI"):
-
     if question:
-   st.session_state.ai_chat_history.append(
-    {"role": "user", "content": question}
-)     
+        st.session_state.ai_chat_history.append(
+            {"role": "user", "content": question}
+        )
 
         prompt = f"""
 You are a professional Google Ads expert.
+
 IMPORTANT LANGUAGE RULES:
 - Detect the language used in the user's question.
 - If the question is in Telugu, answer completely in Telugu.
@@ -2030,7 +2030,9 @@ Conversion Rate: {overall_conversion_rate:.2f}%
 
 User question:
 {question}
+
 Answer the USER QUESTION using the Google Ads data above.
+
 Give:
 1. Clear analysis
 2. Problems
@@ -2046,20 +2048,22 @@ Be practical and concise.
                 model="gpt-5.4-mini",
                 input=prompt
             )
-    st.session_state.ai_chat_history.append(
-    {"role": "assistant", "content": ai_response.output_text}
-)        
+
+        st.session_state.ai_chat_history.append(
+            {
+                "role": "assistant",
+                "content": ai_response.output_text
+            }
+        )
 
         st.markdown("### 🤖 Google Ads AI")
 
-with st.chat_message("user"):
-    st.markdown(question)
+        with st.chat_message("user"):
+            st.markdown(question)
 
-with st.chat_message("assistant"):
-    st.markdown(ai_response.output_text)
+        with st.chat_message("assistant"):
+            st.markdown(ai_response.output_text)
 
     else:
 
-        st.warning(
-            "Please enter a question."
-        )
+        st.warning("Please enter a question.")
