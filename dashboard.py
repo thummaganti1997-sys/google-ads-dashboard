@@ -1990,7 +1990,12 @@ if st.button("Analyze with AI"):
         st.session_state.ai_chat_history.append(
             {"role": "user", "content": question}
         )
-
+        if "search_df" in locals() and not search_df.empty:
+            search_terms_context = search_df.head(100).to_string(index=False)
+        else:
+            search_terms_context = (
+                "No search term data is available for the selected date range."
+            )
         prompt = f"""
 You are a professional Google Ads expert.
 
@@ -2014,15 +2019,22 @@ RESPONSE STYLE:
 - Never invent campaign data that is not provided.
 - Answer only for the selected date range unless the user explicitly asks for another period.
 - Do not claim a Before vs After comparison unless actual before-period and after-period data are provided.
-
+- For negative keyword questions, use only the SEARCH TERMS DATA provided.
+- Never invent negative keywords. If search term data is unavailable, clearly say exact negative keyword recommendations cannot be confirmed.
 Campaign data:
 
 {filtered_df.to_string(index=False)}
+
+SEARCH TERMS DATA:
+
+{search_terms_context}
+
 SELECTED DATE RANGE:
 {date_option}
 
 DATE FILTER USED:
 {date_filter_clause}
+
 Overall metrics:
 
 Impressions: {total_impressions}
