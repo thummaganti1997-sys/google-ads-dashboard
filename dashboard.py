@@ -1982,14 +1982,13 @@ if overall_ctr >= 8:
 st.divider()
 st.header("🤖 Ask AI About Your Campaign")
 
-# ------------------------------------------
+# ==================================================
 # CHAT HISTORY
-# ------------------------------------------
+# ==================================================
 
 if "ai_chat_history" not in st.session_state:
     st.session_state.ai_chat_history = []
 
-# Create a key for the currently selected date period
 if date_option == "Custom Date Range":
     current_ai_period = (
         f"{date_option}:"
@@ -1999,7 +1998,6 @@ if date_option == "Custom Date Range":
 else:
     current_ai_period = date_option
 
-# Automatically clear old chat when date range changes
 if "ai_chat_period" not in st.session_state:
     st.session_state.ai_chat_period = current_ai_period
 
@@ -2007,7 +2005,6 @@ elif st.session_state.ai_chat_period != current_ai_period:
     st.session_state.ai_chat_history = []
     st.session_state.ai_chat_period = current_ai_period
 
-# Manual clear button
 if st.button(
     "🗑️ Clear AI Chat",
     key="clear_ai_chat_button"
@@ -2015,15 +2012,17 @@ if st.button(
     st.session_state.ai_chat_history = []
     st.rerun()
 
-# Show previous conversation
 for message in st.session_state.ai_chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# ==================================================
+# QUESTION BOX
+# ==================================================
 
 question = st.text_input(
     "Ask a question about your campaigns",
-    placeholder="Example: negative keywords చెప్పు",
+    placeholder="Example: గత 30 రోజుల్లో performance ఎలా ఉంది?",
     key="ask_ai_question"
 )
 
@@ -2040,18 +2039,30 @@ analyze_clicked = st.button(
 if pending_ai_question:
     question = pending_ai_question
 
+# ==================================================
+# ANALYZE
+# ==================================================
+
 if analyze_clicked or pending_ai_question:
 
-    if question:
+    if question and question.strip():
 
-    if question:
-
+        question = question.strip()
         question_lower = question.lower()
+
+        # ==================================================
+        # DETECT DATE RANGE
+        # ==================================================
+
         requested_date_option = None
 
         if any(
             phrase in question_lower
-            for phrase in ["today", "ఈ రోజు", "ఈరోజు"]
+            for phrase in [
+                "today",
+                "ఈ రోజు",
+                "ఈరోజు"
+            ]
         ):
             requested_date_option = "Today"
 
@@ -2108,15 +2119,27 @@ if analyze_clicked or pending_ai_question:
                 "గత సంవత్సరం",
                 "1 year"
             ]
-        if (
-    requested_date_option
-    and requested_date_option != date_option
-):
-    st.session_state.pending_ai_date_option = requested_date_option
-    st.session_state.pending_ai_question = question
-    st.session_state.ai_chat_history = []
-    st.rerun()
+        ):
+            requested_date_option = "Last 1 Year"
 
+        # ==================================================
+        # AUTO DATE CHANGE + SAME QUESTION
+        # ==================================================
+
+        if (
+            requested_date_option
+            and requested_date_option != date_option
+        ):
+            st.session_state.pending_ai_date_option = (
+                requested_date_option
+            )
+
+            st.session_state.pending_ai_question = question
+            st.session_state.ai_chat_history = []
+
+            st.rerun()
+
+        # Save user message only after correct date data loads
         st.session_state.ai_chat_history.append(
             {
                 "role": "user",
@@ -2124,15 +2147,56 @@ if analyze_clicked or pending_ai_question:
             }
         )
 
-        # ------------------------------------------
+        # ==================================================
         # SEARCH TERMS CONTEXT
-        # ------------------------------------------
+        # ==================================================
+
         if "search_df" in locals() and not search_df.empty:
+
+            search_terms_for_ai = search_df.copy()
+
+            required_columns = {
+                "Search Term",
+                "Campaign",
+                "Clicks",
+                "Cost (₹)",
+                "Conversions"
+            }
+
+            if required_columns.issubset(
+                search_terms_for_ai.columns
+            ):
+                search_terms_for_ai = (
+                    search_terms_for_ai
+                    .groupby(
+                        ["Search Term", "Campaign"],
+                        as_index=False
+                    )
+                    .agg(
+                        {
+                            "Clicks": "sum",
+                            "Cost (₹)": "sum",
+                            "Conversions": "sum"
+                        }
+                    )
+                    .sort_values(
+                        "Cost (₹)",
+                        ascending=False
+                    )
+                    .head(100)
+                )
+
+            else:
+                search_terms_for_ai = (
+                    search_terms_for_ai.head(100)
+                )
+
             search_terms_context = (
-                search_df
-                .head(100)
-                .to_string(index=False)
+                search_terms_for_ai.to_string(
+                    index=False
+                )
             )
+
             search_terms_available = True
 
         else:
@@ -2140,11 +2204,12 @@ if analyze_clicked or pending_ai_question:
                 "No Search Terms data is available "
                 "for the selected date range."
             )
+
             search_terms_available = False
 
-        # ------------------------------------------
+        # ==================================================
         # BEFORE VS AFTER CONTEXT
-        # ------------------------------------------
+        # ==================================================
 
         if (
             "comparison_data" in locals()
@@ -2153,17 +2218,14 @@ if analyze_clicked or pending_ai_question:
             before_after_context = (
                 comparison_data.to_string(index=False)
             )
-
         else:
             before_after_context = (
                 "No Before vs After comparison data is available."
             )
 
-        # ------------------------------------------
-        # DETECT NEGATIVE KEYWORD QUESTION
-        # ------------------------------------------
-
-        question_lower = question.lower()
+        # ==================================================
+        # NEGATIVE KEYWORD QUESTION
+        # ==================================================
 
         negative_keyword_question = any(
             phrase in question_lower
@@ -2175,11 +2237,10 @@ if analyze_clicked or pending_ai_question:
             ]
         )
 
-        # ------------------------------------------
-        # NO SEARCH TERMS = DO NOT INVENT NEGATIVES
-        # ------------------------------------------
-
-        if negative_keyword_question and not search_terms_available:
+        if (
+            negative_keyword_question
+            and not search_terms_available
+        ):
 
             telugu_question = any(
                 "\u0c00" <= char <= "\u0c7f"
@@ -2190,22 +2251,23 @@ if analyze_clicked or pending_ai_question:
                 assistant_text = (
                     f"Selected date range **{date_option}** లో "
                     "Search Terms data అందుబాటులో లేదు. "
-                    "కాబట్టి actual data ఆధారంగా negative keywords‌ను "
-                    "confirm చేయలేను. నేను ఊహించి keywords suggest చేయను. "
-                    "Search Terms data ఉన్న date range select చేసి "
-                    "మళ్లీ అడగండి."
+                    "కాబట్టి actual Search Terms ఆధారంగా "
+                    "negative keywords‌ను confirm చేయలేను. "
+                    "నేను ఊహించి negative keywords suggest చేయను."
                 )
-
             else:
                 assistant_text = (
                     f"No Search Terms data is available for "
-                    f"**{date_option}**. I cannot confirm negative "
-                    "keywords without actual search-term data, and I "
-                    "will not invent suggestions. Select a date range "
-                    "with Search Terms data and ask again."
+                    f"**{date_option}**. I cannot confirm "
+                    "negative keywords without actual Search Terms data, "
+                    "and I will not invent suggestions."
                 )
 
         else:
+
+            # ==================================================
+            # AI PROMPT
+            # ==================================================
 
             prompt = f"""
 You are a professional Google Ads AI analyst.
@@ -2215,72 +2277,67 @@ IMPORTANT LANGUAGE RULES:
 - If the question is in Telugu, answer in Telugu.
 - If the question is in English, answer in English.
 - If the user mixes Telugu and English, reply naturally in the same style.
-- Keep terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
+- Keep Google Ads technical terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
 
 IMPORTANT DATA RULES:
-- Use only the data provided below.
-- Never invent campaign metrics.
-- Never invent search terms.
+- Use ONLY the Google Ads data supplied below.
+- Never invent metrics.
+- Never invent Search Terms.
 - Never invent negative keywords.
-- The selected date range is the authoritative period for the supplied metrics.
-- If the user asks about a different date period, clearly say that the dashboard is currently set to {date_option} and ask them to select the requested period.
-- Do not present campaign-vs-account data as a Before vs After comparison.
-- Only use the BEFORE VS AFTER DATA when making a Before vs After comparison.
+- The selected date range is the authoritative period for the supplied data.
+- Answer only for that period.
+- Do not present campaign-vs-account performance as Before vs After.
+- Use BEFORE VS AFTER DATA only when actual comparison data is available.
+
+ADVERTISER SERVICES:
+- Home Care
+- Patient Care
+- Elderly Care
+- Nursing Care
+- Baby Care
+- Babysitter
+- Nanny
+- Caretaker
+- Caregiver
 
 NEGATIVE KEYWORD RULES:
-- For negative keyword questions, use ONLY actual terms from SEARCH TERMS DATA.
-- Never invent search terms or negative keywords.
-- Never recommend a search term with Conversions greater than 0 as a negative keyword.
+- Use ONLY actual terms from SEARCH TERMS DATA.
 - Zero conversions alone is NOT enough reason to make a term negative.
-- Use the Campaign column to understand which campaign generated each search term.
-- If a search term is relevant to another service or campaign, label it REVIEW / MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
-- Do not automatically negative core service-intent terms such as home care, patient care, elderly care, nursing care, baby care, babysitter, caretaker, or caregiver.
-- Recommend ADD AS NEGATIVE only when the search intent is clearly irrelevant to the advertiser's service/campaign.
-- Put uncertain terms under REVIEW, not ADD AS NEGATIVE.
-- Put relevant high-intent terms under KEEP.
-- Prefer high-spend, zero-conversion, clearly irrelevant terms first.
-- Explain the reason and show Cost and Conversions for every recommendation.
-- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
-- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
-- Never show the same Search Term more than once. If duplicate rows exist, combine their Cost and Conversions before giving the recommendation.
-- Return negative keyword analysis in exactly 4 sections:
-  1. ADD AS NEGATIVE
-  2. MOVE TO CORRECT CAMPAIGN
-  3. REVIEW
-  4. KEEP
-- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
-- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
-- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
-- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
-- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
-- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
-- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
-- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
-- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
-- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
-- Baby Care, Babysitter and Nanny intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Baby-Care campaign.
-- Nursing Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Nursing-Care campaign.
-- Patient Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Patient-Care campaign.
-- Elderly Care intent must go under MOVE TO CORRECT CAMPAIGN when it appears inside a non-Elderly-Care campaign.
-- If a search term targets a city outside the campaign's intended location, classify it as REVIEW - GEO MISMATCH, even if it has conversions.
-  - The advertiser offers Home Care, Patient Care, Elderly Care, Nursing Care, Baby Care/Babysitter and Caretaker services.
-- Never recommend an offered service category as an account-level negative keyword.
-- If a search term belongs to another service offered by the advertiser, classify it as MOVE TO CORRECT CAMPAIGN instead of ADD AS NEGATIVE.
-- Only classify a term as ADD AS NEGATIVE when its intent is clearly outside all services offered by the advertiser.
-- If a term has conversions greater than 0, never recommend it as a negative keyword.
-- Treat caretaker, caregiver, home care, patient care, elderly care, nursing care, baby care and babysitter agency/service intent as relevant offered-service intent.
-- Terms such as "caretaker agency", "caregiver agency", "patient care agency" and similar service-provider searches must not be ADD AS NEGATIVE solely because they contain the word agency.
-- Terms such as ICU care at home, dressing nurse, bedside care and medical support at home must be REVIEW or MOVE TO CORRECT CAMPAIGN unless clearly outside the advertiser's services.
-- Normalize duplicate Search Terms before classifying them.
-- A Search Term must appear in only ONE final section.
-- If duplicate rows for the same Search Term have any Conversions greater than 0, do not classify that Search Term as ADD AS NEGATIVE.
-- Classification priority is: KEEP if it converted and is relevant; MOVE TO CORRECT CAMPAIGN if it belongs to another offered service; REVIEW if uncertain; ADD AS NEGATIVE only if clearly irrelevant.
+- Never classify a Search Term with Conversions greater than 0 as ADD AS NEGATIVE.
+- Never recommend an offered service category as an account-level negative.
+- Caretaker agency, caregiver agency and similar service-provider intent are relevant.
+- ICU care at home, dressing nurse, bedside care and medical support at home must be REVIEW or MOVE TO CORRECT CAMPAIGN unless clearly irrelevant.
+- Baby Care, Babysitter or Nanny intent in a non-Baby-Care campaign = MOVE TO CORRECT CAMPAIGN.
+- Nursing Care intent in a non-Nursing-Care campaign = MOVE TO CORRECT CAMPAIGN.
+- Patient Care intent in a non-Patient-Care campaign = MOVE TO CORRECT CAMPAIGN.
+- Elderly Care intent in a non-Elderly-Care campaign = MOVE TO CORRECT CAMPAIGN.
+- Search Terms targeting a city outside the intended location = REVIEW - GEO MISMATCH.
+- Relevant high-intent terms = KEEP.
+- Uncertain terms = REVIEW.
+- ADD AS NEGATIVE only when intent is clearly outside ALL advertiser services.
+- Never show the same Search Term more than once.
+- Duplicate Search Terms have been combined where possible.
+- A Search Term can appear in only ONE final category.
+
+Classification priority:
+1. KEEP if relevant and converted
+2. MOVE TO CORRECT CAMPAIGN if it belongs to another offered service
+3. REVIEW if uncertain or geo mismatch
+4. ADD AS NEGATIVE only if clearly irrelevant
+
+For negative keyword analysis return exactly:
+1. ADD AS NEGATIVE
+2. MOVE TO CORRECT CAMPAIGN
+3. REVIEW
+4. KEEP
+
 RESPONSE STYLE:
 - Answer the user's exact question first.
 - Be practical and concise.
-- Show ₹ values where relevant.
-- Highlight CTR, CPC, CPA, Cost and Conversions when useful.
-- Use tables when they make the answer clearer.
+- Use ₹ for money.
+- Use clear markdown tables where useful.
+- Highlight CTR, CPC, CPA, Cost and Conversions where relevant.
+- Explain problems clearly.
 - Finish with 3 priority actions.
 
 SELECTED DATE RANGE:
@@ -2304,7 +2361,7 @@ Clicks: {total_clicks}
 Cost: ₹{total_cost:.2f}
 Conversions: {total_conversions:.2f}
 CTR: {overall_ctr:.2f}%
-CPC: ₹{overall_cpc:.2f}
+Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
 
@@ -2313,6 +2370,10 @@ USER QUESTION:
 
 Answer the USER QUESTION using only the supplied data.
 """
+
+            # ==================================================
+            # OPENAI
+            # ==================================================
 
             with st.spinner("AI is analyzing..."):
 
@@ -2323,7 +2384,10 @@ Answer the USER QUESTION using only the supplied data.
 
             assistant_text = ai_response.output_text
 
-        # Save assistant response
+        # ==================================================
+        # SAVE RESPONSE
+        # ==================================================
+
         st.session_state.ai_chat_history.append(
             {
                 "role": "assistant",
@@ -2331,7 +2395,10 @@ Answer the USER QUESTION using only the supplied data.
             }
         )
 
-        # Show current question and response immediately
+        # ==================================================
+        # SHOW CURRENT ANSWER
+        # ==================================================
+
         st.markdown("### 🤖 Google Ads AI")
 
         with st.chat_message("user"):
@@ -2341,7 +2408,6 @@ Answer the USER QUESTION using only the supplied data.
             st.markdown(assistant_text)
 
     else:
-
         st.warning("Please enter a question.")
 if summary_actions:
 
