@@ -2023,14 +2023,26 @@ for message in st.session_state.ai_chat_history:
 
 question = st.text_input(
     "Ask a question about your campaigns",
-    placeholder="Example: negative keywords చెప్పు"
+    placeholder="Example: negative keywords చెప్పు",
+    key="ask_ai_question"
 )
 
+pending_ai_question = st.session_state.pop(
+    "pending_ai_question",
+    None
+)
 
-if st.button(
+analyze_clicked = st.button(
     "Analyze with AI",
     key="ask_ai_analyze_button"
-):
+)
+
+if pending_ai_question:
+    question = pending_ai_question
+
+if analyze_clicked or pending_ai_question:
+
+    if question:
 
     if question:
 
@@ -2096,16 +2108,14 @@ if st.button(
                 "గత సంవత్సరం",
                 "1 year"
             ]
-        ):
-            requested_date_option = "Last 1 Year"
-
         if (
-            requested_date_option
-            and requested_date_option != date_option
-        ):
-            st.session_state.pending_ai_date_option = requested_date_option
-            st.session_state.ai_chat_history = []
-            st.rerun()
+    requested_date_option
+    and requested_date_option != date_option
+):
+    st.session_state.pending_ai_date_option = requested_date_option
+    st.session_state.pending_ai_question = question
+    st.session_state.ai_chat_history = []
+    st.rerun()
 
         st.session_state.ai_chat_history.append(
             {
