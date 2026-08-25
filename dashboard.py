@@ -2033,7 +2033,93 @@ if st.button(
 ):
 
     if question:
+if st.button(
+    "Analyze with AI",
+    key="ask_ai_analyze_button"
+):
 
+    if question:
+
+        question_lower = question.lower()
+
+        requested_date_option = None
+
+        if any(
+            phrase in question_lower
+            for phrase in ["today", "ఈ రోజు", "ఈరోజు"]
+        ):
+            requested_date_option = "Today"
+
+        elif any(
+            phrase in question_lower
+            for phrase in [
+                "last 7 days",
+                "గత 7 రోజులు",
+                "గత 7 రోజుల్లో",
+                "7 days"
+            ]
+        ):
+            requested_date_option = "Last 7 Days"
+
+        elif any(
+            phrase in question_lower
+            for phrase in [
+                "last 30 days",
+                "గత 30 రోజులు",
+                "గత 30 రోజుల్లో",
+                "30 days"
+            ]
+        ):
+            requested_date_option = "Last 30 Days"
+
+        elif any(
+            phrase in question_lower
+            for phrase in [
+                "last 90 days",
+                "గత 90 రోజులు",
+                "గత 90 రోజుల్లో",
+                "90 days"
+            ]
+        ):
+            requested_date_option = "Last 90 Days"
+
+        elif any(
+            phrase in question_lower
+            for phrase in [
+                "last 6 months",
+                "గత 6 నెలలు",
+                "గత 6 నెలల్లో",
+                "6 months"
+            ]
+        ):
+            requested_date_option = "Last 6 Months"
+
+        elif any(
+            phrase in question_lower
+            for phrase in [
+                "last 1 year",
+                "last year",
+                "గత 1 సంవత్సరం",
+                "గత సంవత్సరం",
+                "1 year"
+            ]
+        ):
+            requested_date_option = "Last 1 Year"
+
+        if (
+            requested_date_option
+            and requested_date_option != date_option
+        ):
+            st.session_state.pending_ai_date_option = requested_date_option
+            st.session_state.ai_chat_history = []
+            st.rerun()
+
+        st.session_state.ai_chat_history.append(
+            {
+                "role": "user",
+                "content": question
+            }
+        )
         st.session_state.ai_chat_history.append(
             {
                 "role": "user",
