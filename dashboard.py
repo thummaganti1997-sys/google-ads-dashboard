@@ -2184,8 +2184,11 @@ st.header("📊 Before vs After Performance Intelligence")
 
 
 def baf_numeric_series(data, possible_names):
+
     for column_name in possible_names:
+
         if column_name in data.columns:
+
             return pd.to_numeric(
                 data[column_name],
                 errors="coerce"
@@ -2271,8 +2274,10 @@ def baf_summary(data):
 def baf_pct_change(before_value, after_value):
 
     if before_value == 0:
+
         if after_value == 0:
             return 0
+
         return 100
 
     return (
@@ -2307,9 +2312,9 @@ if "daily_df" in locals() and not daily_df.empty:
         .reset_index(drop=True)
     )
 
-    # ----------------------------------------------
-    # EXACT SELECTED PERIOD
-    # ----------------------------------------------
+    # ==============================================
+    # SELECTED PERIOD BOUNDARIES
+    # ==============================================
 
     if date_option == "Last 30 Days":
 
@@ -2346,12 +2351,10 @@ if "daily_df" in locals() and not daily_df.empty:
             .normalize()
         )
 
-
     total_days = (
         period_end_date
         - period_start_date
     ).days + 1
-
 
     if total_days >= 2:
 
@@ -2373,6 +2376,10 @@ if "daily_df" in locals() and not daily_df.empty:
 
         after_end_date = period_end_date
 
+        after_days = (
+            after_end_date
+            - after_start_date
+        ).days + 1
 
         before_df = compare_df[
             (compare_df["Date"] >= before_start_date)
@@ -2380,13 +2387,11 @@ if "daily_df" in locals() and not daily_df.empty:
             (compare_df["Date"] <= before_end_date)
         ].copy()
 
-
         after_df = compare_df[
             (compare_df["Date"] >= after_start_date)
             &
             (compare_df["Date"] <= after_end_date)
         ].copy()
-
 
         before_metrics = baf_summary(
             before_df
@@ -2395,7 +2400,6 @@ if "daily_df" in locals() and not daily_df.empty:
         after_metrics = baf_summary(
             after_df
         )
-
 
         before_start_text = (
             before_start_date.strftime(
@@ -2421,13 +2425,6 @@ if "daily_df" in locals() and not daily_df.empty:
             )
         )
 
-
-        after_days = (
-            after_end_date
-            - after_start_date
-        ).days + 1
-
-
         st.caption(
             f"📅 Before ({before_days} days): "
             f"{before_start_text} → {before_end_text} | "
@@ -2435,10 +2432,9 @@ if "daily_df" in locals() and not daily_df.empty:
             f"{after_start_text} → {after_end_text}"
         )
 
-
-        # ------------------------------------------
+        # ==========================================
         # CHANGES
-        # ------------------------------------------
+        # ==========================================
 
         impressions_change = baf_pct_change(
             before_metrics["Impressions"],
@@ -2479,7 +2475,6 @@ if "daily_df" in locals() and not daily_df.empty:
             before_metrics["Conversion Rate"],
             after_metrics["Conversion Rate"]
         )
-
 
         comparison_table = pd.DataFrame({
 
@@ -2528,23 +2523,30 @@ if "daily_df" in locals() and not daily_df.empty:
             ]
         })
 
-
         st.dataframe(
             comparison_table,
             use_container_width=True,
             hide_index=True
         )
 
-
         # ==========================================
-        # PERFORMANCE INTELLIGENCE SCORE
+        # BALANCED PERFORMANCE SCORE
         # ==========================================
 
         intelligence_score = 50
         intelligence_notes = []
 
+        # Conversions
+        if conversions_change >= 20:
 
-        if conversions_change > 10:
+            intelligence_score += 20
+
+            intelligence_notes.append(
+                f"🟢 Conversions improved strongly by "
+                f"{conversions_change:.1f}%."
+            )
+
+        elif conversions_change >= 10:
 
             intelligence_score += 15
 
@@ -2553,7 +2555,16 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{conversions_change:.1f}%."
             )
 
-        elif conversions_change < -10:
+        elif conversions_change <= -20:
+
+            intelligence_score -= 20
+
+            intelligence_notes.append(
+                f"🔴 Conversions declined strongly by "
+                f"{abs(conversions_change):.1f}%."
+            )
+
+        elif conversions_change <= -10:
 
             intelligence_score -= 15
 
@@ -2562,8 +2573,8 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{abs(conversions_change):.1f}%."
             )
 
-
-        if cpa_change < -10:
+        # CPA
+        if cpa_change <= -10:
 
             intelligence_score += 15
 
@@ -2572,17 +2583,26 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{abs(cpa_change):.1f}%."
             )
 
-        elif cpa_change > 10:
+        elif cpa_change >= 25:
 
             intelligence_score -= 15
 
             intelligence_notes.append(
-                f"🔴 CPA increased by "
+                f"🔴 CPA increased significantly by "
                 f"{cpa_change:.1f}%."
             )
 
+        elif cpa_change >= 10:
 
-        if ctr_change > 10:
+            intelligence_score -= 10
+
+            intelligence_notes.append(
+                f"🟠 CPA increased by "
+                f"{cpa_change:.1f}%."
+            )
+
+        # CTR
+        if ctr_change >= 10:
 
             intelligence_score += 10
 
@@ -2591,17 +2611,26 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{ctr_change:.1f}%."
             )
 
-        elif ctr_change < -10:
+        elif ctr_change <= -20:
 
             intelligence_score -= 10
+
+            intelligence_notes.append(
+                f"🔴 CTR declined significantly by "
+                f"{abs(ctr_change):.1f}%."
+            )
+
+        elif ctr_change <= -10:
+
+            intelligence_score -= 5
 
             intelligence_notes.append(
                 f"🟠 CTR declined by "
                 f"{abs(ctr_change):.1f}%."
             )
 
-
-        if conversion_rate_change > 10:
+        # Conversion Rate
+        if conversion_rate_change >= 10:
 
             intelligence_score += 10
 
@@ -2610,7 +2639,7 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{conversion_rate_change:.1f}%."
             )
 
-        elif conversion_rate_change < -10:
+        elif conversion_rate_change <= -15:
 
             intelligence_score -= 10
 
@@ -2619,6 +2648,14 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{abs(conversion_rate_change):.1f}%."
             )
 
+        elif conversion_rate_change <= -5:
+
+            intelligence_score -= 5
+
+            intelligence_notes.append(
+                f"🟠 Conversion Rate declined by "
+                f"{abs(conversion_rate_change):.1f}%."
+            )
 
         intelligence_score = max(
             0,
@@ -2628,6 +2665,9 @@ if "daily_df" in locals() and not daily_df.empty:
             )
         )
 
+        # ==========================================
+        # STATUS
+        # ==========================================
 
         if intelligence_score >= 75:
 
@@ -2653,9 +2693,7 @@ if "daily_df" in locals() and not daily_df.empty:
                 "🔴 Performance Declining"
             )
 
-
         score_col1, score_col2 = st.columns(2)
-
 
         with score_col1:
 
@@ -2664,7 +2702,6 @@ if "daily_df" in locals() and not daily_df.empty:
                 f"{intelligence_score}/100"
             )
 
-
         with score_col2:
 
             st.metric(
@@ -2672,11 +2709,9 @@ if "daily_df" in locals() and not daily_df.empty:
                 intelligence_status
             )
 
-
         st.progress(
             intelligence_score / 100
         )
-
 
         # ==========================================
         # INTERPRETATION
@@ -2685,7 +2720,6 @@ if "daily_df" in locals() and not daily_df.empty:
         st.subheader(
             "🧠 Performance Interpretation"
         )
-
 
         if intelligence_notes:
 
@@ -2699,57 +2733,47 @@ if "daily_df" in locals() and not daily_df.empty:
                 "between both periods."
             )
 
-
         # ==========================================
-        # RECOMMENDED NEXT MOVE
+        # RECOMMENDATION - MATCH SCORE
         # ==========================================
 
         st.subheader(
             "🎯 Recommended Next Move"
         )
 
-
-        if (
-            conversions_change > 10
-            and cpa_change < 0
-        ):
+        if intelligence_score >= 75:
 
             st.success(
-                "Performance improved: conversions increased "
-                "while CPA decreased. Protect winning campaigns "
-                "and scale budget gradually."
+                "Overall performance improved strongly. "
+                "Protect winning campaigns and increase "
+                "budget gradually while monitoring CPA."
             )
 
+        elif intelligence_score >= 55:
 
-        elif (
-            conversions_change < 0
-            and cpa_change > 0
-        ):
-
-            st.error(
-                "Performance worsened: conversions decreased "
-                "while CPA increased. Reduce waste, review "
-                "search terms, bids and landing-page quality "
-                "before increasing budget."
+            st.info(
+                "Performance is generally stable or improving. "
+                "Continue optimizing search terms and scale "
+                "only campaigns with healthy CPA."
             )
 
-
-        elif cpa_change > 20:
+        elif intelligence_score >= 35:
 
             st.warning(
-                "CPA increased significantly. Focus on expensive "
-                "keywords, search terms and conversion quality."
+                "Performance is mixed and needs attention. "
+                "Conversions may be improving, but efficiency "
+                "metrics such as CTR, CPA or Conversion Rate "
+                "need optimization before major budget increases."
             )
-
 
         else:
 
-            st.info(
-                "Performance is mixed. Continue monitoring CTR, "
-                "Avg CPC, CPA, conversion rate and search-term "
-                "quality before large budget changes."
+            st.error(
+                "Overall performance is declining. "
+                "Reduce waste, review search terms, bids, "
+                "ad relevance and landing-page quality "
+                "before increasing budget."
             )
-
 
     else:
 
@@ -2757,7 +2781,6 @@ if "daily_df" in locals() and not daily_df.empty:
             "At least 2 days of data are required "
             "for Before vs After comparison."
         )
-
 
 else:
 
