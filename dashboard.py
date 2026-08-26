@@ -1468,9 +1468,21 @@ if "search_df" in locals() and not search_df.empty:
             key="negative_keyword_ai_button"
         ):
 
-            negative_context = negative_candidates.head(
-                30
-            ).to_string(index=False)
+            negative_context = (
+    negative_candidates[
+        [
+            "Search Term",
+            "Campaign",
+            "Clicks",
+            "Cost (₹)",
+            "Conversions"
+        ]
+    ]
+    .head(25)
+    .to_string(
+        index=False
+    )
+)
 
             negative_prompt = f"""
 You are a senior Google Ads search-term optimization specialist.
