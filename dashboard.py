@@ -2176,61 +2176,64 @@ for i, action in enumerate(
         f"**{i}. {action}**"
     )
 # ==================================================
-# ADVANCED BEFORE VS AFTER PERFORMANCE INTELLIGENCE
+# BEFORE VS AFTER PERFORMANCE INTELLIGENCE
 # ==================================================
 
 st.divider()
 st.header("📊 Before vs After Performance Intelligence")
 
 
-def get_numeric_column(df, possible_names):
-    for col in possible_names:
-        if col in df.columns:
+def baf_numeric_series(data, possible_names):
+    for column_name in possible_names:
+        if column_name in data.columns:
             return pd.to_numeric(
-                df[col],
+                data[column_name],
                 errors="coerce"
             ).fillna(0)
+
     return pd.Series(
-        [0] * len(df),
-        index=df.index,
-        dtype=float
+        0.0,
+        index=data.index
     )
 
 
-def advanced_period_summary(data):
+def baf_summary(data):
 
-    impressions_series = get_numeric_column(
-        data,
-        ["Impressions"]
+    impressions = float(
+        baf_numeric_series(
+            data,
+            ["Impressions"]
+        ).sum()
     )
 
-    clicks_series = get_numeric_column(
-        data,
-        ["Clicks"]
+    clicks = float(
+        baf_numeric_series(
+            data,
+            ["Clicks"]
+        ).sum()
     )
 
-    cost_series = get_numeric_column(
-        data,
-        [
-            "Cost (₹)",
-            "Cost",
-            "Spend",
-            "Spend (₹)"
-        ]
+    cost = float(
+        baf_numeric_series(
+            data,
+            [
+                "Cost",
+                "Cost (₹)",
+                "Spend",
+                "Spend (₹)"
+            ]
+        ).sum()
     )
 
-    conversions_series = get_numeric_column(
-        data,
-        ["Conversions"]
+    conversions = float(
+        baf_numeric_series(
+            data,
+            ["Conversions"]
+        ).sum()
     )
-
-    impressions = float(impressions_series.sum())
-    clicks = float(clicks_series.sum())
-    cost = float(cost_series.sum())
-    conversions = float(conversions_series.sum())
 
     ctr = (
-        (clicks / impressions) * 100
+        clicks / impressions * 100
         if impressions > 0
         else 0
     )
@@ -2248,7 +2251,7 @@ def advanced_period_summary(data):
     )
 
     conversion_rate = (
-        (conversions / clicks) * 100
+        conversions / clicks * 100
         if clicks > 0
         else 0
     )
@@ -2265,7 +2268,7 @@ def advanced_period_summary(data):
     }
 
 
-def pct_change(before_value, after_value):
+def baf_pct_change(before_value, after_value):
 
     if before_value == 0:
         if after_value == 0:
@@ -2278,58 +2281,208 @@ def pct_change(before_value, after_value):
     ) * 100
 
 
-if (
-    "before_df" in locals()
-    and "after_df" in locals()
-    and not before_df.empty
-    and not after_df.empty
-):
+if "daily_df" in locals() and not daily_df.empty:
 
-    before_metrics = advanced_period_summary(before_df)
-    after_metrics = advanced_period_summary(after_df)
+    compare_df = daily_df.copy()
 
-    impressions_change = pct_change(
-        before_metrics["Impressions"],
-        after_metrics["Impressions"]
+    if "Date" not in compare_df.columns:
+        compare_df = compare_df.reset_index()
+
+    if "Date" not in compare_df.columns:
+        compare_df = compare_df.rename(
+            columns={
+                compare_df.columns[0]: "Date"
+            }
+        )
+
+    compare_df["Date"] = pd.to_datetime(
+        compare_df["Date"],
+        errors="coerce"
     )
 
-    clicks_change = pct_change(
-        before_metrics["Clicks"],
-        after_metrics["Clicks"]
+    compare_df = (
+        compare_df
+        .dropna(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
     )
 
-    cost_change = pct_change(
-        before_metrics["Cost"],
-        after_metrics["Cost"]
-    )
+    # ----------------------------------------------
+    # EXACT SELECTED PERIOD
+    # ----------------------------------------------
 
-    conversions_change = pct_change(
-        before_metrics["Conversions"],
-        after_metrics["Conversions"]
-    )
+    if date_option == "Last 30 Days":
 
-    ctr_change = pct_change(
-        before_metrics["CTR"],
-        after_metrics["CTR"]
-    )
+        period_end_date = pd.Timestamp(
+            today - timedelta(days=1)
+        )
 
-    cpc_change = pct_change(
-        before_metrics["Avg CPC"],
-        after_metrics["Avg CPC"]
-    )
+        period_start_date = (
+            period_end_date
+            - pd.Timedelta(days=29)
+        )
 
-    cpa_change = pct_change(
-        before_metrics["CPA"],
-        after_metrics["CPA"]
-    )
+    elif date_option == "Custom Date Range":
 
-    conversion_rate_change = pct_change(
-        before_metrics["Conversion Rate"],
-        after_metrics["Conversion Rate"]
-    )
+        period_start_date = pd.Timestamp(
+            start_date
+        )
 
-    comparison_table = pd.DataFrame(
-        {
+        period_end_date = pd.Timestamp(
+            end_date
+        )
+
+    else:
+
+        period_start_date = (
+            compare_df["Date"]
+            .min()
+            .normalize()
+        )
+
+        period_end_date = (
+            compare_df["Date"]
+            .max()
+            .normalize()
+        )
+
+
+    total_days = (
+        period_end_date
+        - period_start_date
+    ).days + 1
+
+
+    if total_days >= 2:
+
+        before_days = total_days // 2
+
+        before_start_date = period_start_date
+
+        before_end_date = (
+            before_start_date
+            + pd.Timedelta(
+                days=before_days - 1
+            )
+        )
+
+        after_start_date = (
+            before_end_date
+            + pd.Timedelta(days=1)
+        )
+
+        after_end_date = period_end_date
+
+
+        before_df = compare_df[
+            (compare_df["Date"] >= before_start_date)
+            &
+            (compare_df["Date"] <= before_end_date)
+        ].copy()
+
+
+        after_df = compare_df[
+            (compare_df["Date"] >= after_start_date)
+            &
+            (compare_df["Date"] <= after_end_date)
+        ].copy()
+
+
+        before_metrics = baf_summary(
+            before_df
+        )
+
+        after_metrics = baf_summary(
+            after_df
+        )
+
+
+        before_start_text = (
+            before_start_date.strftime(
+                "%d %b %Y"
+            )
+        )
+
+        before_end_text = (
+            before_end_date.strftime(
+                "%d %b %Y"
+            )
+        )
+
+        after_start_text = (
+            after_start_date.strftime(
+                "%d %b %Y"
+            )
+        )
+
+        after_end_text = (
+            after_end_date.strftime(
+                "%d %b %Y"
+            )
+        )
+
+
+        after_days = (
+            after_end_date
+            - after_start_date
+        ).days + 1
+
+
+        st.caption(
+            f"📅 Before ({before_days} days): "
+            f"{before_start_text} → {before_end_text} | "
+            f"After ({after_days} days): "
+            f"{after_start_text} → {after_end_text}"
+        )
+
+
+        # ------------------------------------------
+        # CHANGES
+        # ------------------------------------------
+
+        impressions_change = baf_pct_change(
+            before_metrics["Impressions"],
+            after_metrics["Impressions"]
+        )
+
+        clicks_change = baf_pct_change(
+            before_metrics["Clicks"],
+            after_metrics["Clicks"]
+        )
+
+        cost_change = baf_pct_change(
+            before_metrics["Cost"],
+            after_metrics["Cost"]
+        )
+
+        conversions_change = baf_pct_change(
+            before_metrics["Conversions"],
+            after_metrics["Conversions"]
+        )
+
+        ctr_change = baf_pct_change(
+            before_metrics["CTR"],
+            after_metrics["CTR"]
+        )
+
+        cpc_change = baf_pct_change(
+            before_metrics["Avg CPC"],
+            after_metrics["Avg CPC"]
+        )
+
+        cpa_change = baf_pct_change(
+            before_metrics["CPA"],
+            after_metrics["CPA"]
+        )
+
+        conversion_rate_change = baf_pct_change(
+            before_metrics["Conversion Rate"],
+            after_metrics["Conversion Rate"]
+        )
+
+
+        comparison_table = pd.DataFrame({
+
             "Metric": [
                 "Impressions",
                 "Clicks",
@@ -2373,168 +2526,243 @@ if (
                 f"{cpa_change:+.1f}%",
                 f"{conversion_rate_change:+.1f}%"
             ]
-        }
-    )
+        })
 
-    st.dataframe(
-        comparison_table,
-        use_container_width=True,
-        hide_index=True
-    )
 
-    # ==============================================
-    # PERFORMANCE INTELLIGENCE SCORE
-    # ==============================================
-
-    intelligence_score = 50
-    intelligence_notes = []
-
-    if conversions_change > 10:
-        intelligence_score += 15
-        intelligence_notes.append(
-            f"🟢 Conversions improved by {conversions_change:.1f}%."
+        st.dataframe(
+            comparison_table,
+            use_container_width=True,
+            hide_index=True
         )
 
-    elif conversions_change < -10:
-        intelligence_score -= 15
-        intelligence_notes.append(
-            f"🔴 Conversions declined by {abs(conversions_change):.1f}%."
+
+        # ==========================================
+        # PERFORMANCE INTELLIGENCE SCORE
+        # ==========================================
+
+        intelligence_score = 50
+        intelligence_notes = []
+
+
+        if conversions_change > 10:
+
+            intelligence_score += 15
+
+            intelligence_notes.append(
+                f"🟢 Conversions improved by "
+                f"{conversions_change:.1f}%."
+            )
+
+        elif conversions_change < -10:
+
+            intelligence_score -= 15
+
+            intelligence_notes.append(
+                f"🔴 Conversions declined by "
+                f"{abs(conversions_change):.1f}%."
+            )
+
+
+        if cpa_change < -10:
+
+            intelligence_score += 15
+
+            intelligence_notes.append(
+                f"🟢 CPA improved by "
+                f"{abs(cpa_change):.1f}%."
+            )
+
+        elif cpa_change > 10:
+
+            intelligence_score -= 15
+
+            intelligence_notes.append(
+                f"🔴 CPA increased by "
+                f"{cpa_change:.1f}%."
+            )
+
+
+        if ctr_change > 10:
+
+            intelligence_score += 10
+
+            intelligence_notes.append(
+                f"🟢 CTR improved by "
+                f"{ctr_change:.1f}%."
+            )
+
+        elif ctr_change < -10:
+
+            intelligence_score -= 10
+
+            intelligence_notes.append(
+                f"🟠 CTR declined by "
+                f"{abs(ctr_change):.1f}%."
+            )
+
+
+        if conversion_rate_change > 10:
+
+            intelligence_score += 10
+
+            intelligence_notes.append(
+                f"🟢 Conversion Rate improved by "
+                f"{conversion_rate_change:.1f}%."
+            )
+
+        elif conversion_rate_change < -10:
+
+            intelligence_score -= 10
+
+            intelligence_notes.append(
+                f"🔴 Conversion Rate declined by "
+                f"{abs(conversion_rate_change):.1f}%."
+            )
+
+
+        intelligence_score = max(
+            0,
+            min(
+                100,
+                intelligence_score
+            )
         )
 
-    if cpa_change < -10:
-        intelligence_score += 15
-        intelligence_notes.append(
-            f"🟢 CPA improved by {abs(cpa_change):.1f}%."
+
+        if intelligence_score >= 75:
+
+            intelligence_status = (
+                "🟢 Strong Improvement"
+            )
+
+        elif intelligence_score >= 55:
+
+            intelligence_status = (
+                "🟡 Stable / Improving"
+            )
+
+        elif intelligence_score >= 35:
+
+            intelligence_status = (
+                "🟠 Needs Attention"
+            )
+
+        else:
+
+            intelligence_status = (
+                "🔴 Performance Declining"
+            )
+
+
+        score_col1, score_col2 = st.columns(2)
+
+
+        with score_col1:
+
+            st.metric(
+                "Performance Intelligence Score",
+                f"{intelligence_score}/100"
+            )
+
+
+        with score_col2:
+
+            st.metric(
+                "Performance Trend",
+                intelligence_status
+            )
+
+
+        st.progress(
+            intelligence_score / 100
         )
 
-    elif cpa_change > 10:
-        intelligence_score -= 15
-        intelligence_notes.append(
-            f"🔴 CPA increased by {cpa_change:.1f}%."
+
+        # ==========================================
+        # INTERPRETATION
+        # ==========================================
+
+        st.subheader(
+            "🧠 Performance Interpretation"
         )
 
-    if ctr_change > 10:
-        intelligence_score += 10
-        intelligence_notes.append(
-            f"🟢 CTR improved by {ctr_change:.1f}%."
+
+        if intelligence_notes:
+
+            for note in intelligence_notes:
+                st.write(note)
+
+        else:
+
+            st.write(
+                "🟡 Performance is relatively stable "
+                "between both periods."
+            )
+
+
+        # ==========================================
+        # RECOMMENDED NEXT MOVE
+        # ==========================================
+
+        st.subheader(
+            "🎯 Recommended Next Move"
         )
 
-    elif ctr_change < -10:
-        intelligence_score -= 10
-        intelligence_notes.append(
-            f"🟠 CTR declined by {abs(ctr_change):.1f}%."
-        )
 
-    if conversion_rate_change > 10:
-        intelligence_score += 10
-        intelligence_notes.append(
-            f"🟢 Conversion Rate improved by "
-            f"{conversion_rate_change:.1f}%."
-        )
+        if (
+            conversions_change > 10
+            and cpa_change < 0
+        ):
 
-    elif conversion_rate_change < -10:
-        intelligence_score -= 10
-        intelligence_notes.append(
-            f"🔴 Conversion Rate declined by "
-            f"{abs(conversion_rate_change):.1f}%."
-        )
+            st.success(
+                "Performance improved: conversions increased "
+                "while CPA decreased. Protect winning campaigns "
+                "and scale budget gradually."
+            )
 
-    intelligence_score = max(
-        0,
-        min(100, intelligence_score)
-    )
 
-    if intelligence_score >= 75:
-        intelligence_status = "🟢 Strong Improvement"
+        elif (
+            conversions_change < 0
+            and cpa_change > 0
+        ):
 
-    elif intelligence_score >= 55:
-        intelligence_status = "🟡 Stable / Improving"
+            st.error(
+                "Performance worsened: conversions decreased "
+                "while CPA increased. Reduce waste, review "
+                "search terms, bids and landing-page quality "
+                "before increasing budget."
+            )
 
-    elif intelligence_score >= 35:
-        intelligence_status = "🟠 Needs Attention"
 
-    else:
-        intelligence_status = "🔴 Performance Declining"
+        elif cpa_change > 20:
 
-    score_col1, score_col2 = st.columns(2)
+            st.warning(
+                "CPA increased significantly. Focus on expensive "
+                "keywords, search terms and conversion quality."
+            )
 
-    with score_col1:
-        st.metric(
-            "Performance Intelligence Score",
-            f"{intelligence_score}/100"
-        )
 
-    with score_col2:
-        st.metric(
-            "Performance Trend",
-            intelligence_status
-        )
+        else:
 
-    st.progress(
-        intelligence_score / 100
-    )
+            st.info(
+                "Performance is mixed. Continue monitoring CTR, "
+                "Avg CPC, CPA, conversion rate and search-term "
+                "quality before large budget changes."
+            )
 
-    # ==============================================
-    # PERFORMANCE INTERPRETATION
-    # ==============================================
-
-    st.subheader("🧠 Performance Interpretation")
-
-    if intelligence_notes:
-        for note in intelligence_notes:
-            st.write(note)
-
-    else:
-        st.write(
-            "🟡 Performance is relatively stable between both periods."
-        )
-
-    # ==============================================
-    # RECOMMENDED NEXT MOVE
-    # ==============================================
-
-    st.subheader("🎯 Recommended Next Move")
-
-    if (
-        conversions_change > 10
-        and cpa_change < 0
-    ):
-
-        st.success(
-            "Performance improved: conversions increased while CPA decreased. "
-            "Protect winning campaigns and scale budget gradually."
-        )
-
-    elif (
-        conversions_change < 0
-        and cpa_change > 0
-    ):
-
-        st.error(
-            "Performance worsened: conversions decreased while CPA increased. "
-            "Reduce waste, review search terms, bids and landing-page quality "
-            "before increasing budget."
-        )
-
-    elif cpa_change > 20:
-
-        st.warning(
-            "CPA increased significantly. Focus on expensive keywords, "
-            "search terms and conversion quality."
-        )
 
     else:
 
         st.info(
-            "Performance is mixed. Continue monitoring CTR, Avg CPC, CPA, "
-            "conversion rate and search-term quality before making "
-            "large budget changes."
+            "At least 2 days of data are required "
+            "for Before vs After comparison."
         )
+
 
 else:
 
     st.info(
-        "Before vs After data is not available for this selection."
+        "Daily performance data is not available."
     )    
 # ==================================================
 # ASK AI
