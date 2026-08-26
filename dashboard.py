@@ -1995,74 +1995,108 @@ else:
 st.divider()
 st.header("🧠 Account Health Score")
 
+# Use the currently selected campaign/date-range data
+health_impressions = float(filtered_df["Impressions"].sum()) if "Impressions" in filtered_df.columns else 0
+health_clicks = float(filtered_df["Clicks"].sum()) if "Clicks" in filtered_df.columns else 0
+health_cost = float(filtered_df["Cost (₹)"].sum()) if "Cost (₹)" in filtered_df.columns else 0
+health_conversions = float(filtered_df["Conversions"].sum()) if "Conversions" in filtered_df.columns else 0
+
+health_ctr = (
+    (health_clicks / health_impressions) * 100
+    if health_impressions > 0 else 0
+)
+
+health_cpc = (
+    health_cost / health_clicks
+    if health_clicks > 0 else 0
+)
+
+health_cpa = (
+    health_cost / health_conversions
+    if health_conversions > 0 else 0
+)
+
+health_conversion_rate = (
+    (health_conversions / health_clicks) * 100
+    if health_clicks > 0 else 0
+)
+
 health_score = 100
 health_notes = []
 
 # CTR
-if overall_ctr < 3:
+if health_ctr < 3:
     health_score -= 20
-    health_notes.append("🔴 CTR is low.")
-elif overall_ctr < 6:
+    health_notes.append(f"🔴 CTR is low at {health_ctr:.2f}%.")
+elif health_ctr < 6:
     health_score -= 10
-    health_notes.append("🟠 CTR needs improvement.")
+    health_notes.append(f"🟠 CTR needs improvement at {health_ctr:.2f}%.")
 else:
-    health_notes.append("🟢 CTR is healthy.")
+    health_notes.append(f"🟢 CTR is healthy at {health_ctr:.2f}%.")
 
 # CPC
-if overall_cpc > 60:
+if health_cpc > 60:
     health_score -= 15
-    health_notes.append("🔴 CPC is high.")
-elif overall_cpc > 40:
+    health_notes.append(f"🔴 CPC is high at ₹{health_cpc:.2f}.")
+elif health_cpc > 40:
     health_score -= 8
-    health_notes.append("🟠 CPC is moderately high.")
+    health_notes.append(f"🟠 CPC is moderately high at ₹{health_cpc:.2f}.")
 else:
-    health_notes.append("🟢 CPC is under control.")
+    health_notes.append(f"🟢 CPC is under control at ₹{health_cpc:.2f}.")
 
 # Conversion Rate
-if overall_conversion_rate < 2:
+if health_conversion_rate < 2:
     health_score -= 20
-    health_notes.append("🔴 Conversion Rate is low.")
-elif overall_conversion_rate < 5:
+    health_notes.append(
+        f"🔴 Conversion Rate is low at {health_conversion_rate:.2f}%."
+    )
+elif health_conversion_rate < 5:
     health_score -= 10
-    health_notes.append("🟠 Conversion Rate needs improvement.")
+    health_notes.append(
+        f"🟠 Conversion Rate needs improvement at {health_conversion_rate:.2f}%."
+    )
 else:
-    health_notes.append("🟢 Conversion Rate is healthy.")
+    health_notes.append(
+        f"🟢 Conversion Rate is healthy at {health_conversion_rate:.2f}%."
+    )
 
 # CPA
-if total_conversions > 0:
-    if overall_cpa > 2000:
+if health_conversions > 0:
+    if health_cpa > 2000:
         health_score -= 20
-        health_notes.append("🔴 CPA is high.")
-    elif overall_cpa > 1000:
+        health_notes.append(f"🔴 CPA is high at ₹{health_cpa:.2f}.")
+    elif health_cpa > 1000:
         health_score -= 10
-        health_notes.append("🟠 CPA needs monitoring.")
+        health_notes.append(f"🟠 CPA needs monitoring at ₹{health_cpa:.2f}.")
     else:
-        health_notes.append("🟢 CPA is healthy.")
+        health_notes.append(f"🟢 CPA is healthy at ₹{health_cpa:.2f}.")
 else:
     health_score -= 20
-    health_notes.append("🔴 No conversions recorded.")
+    health_notes.append("🔴 No conversions recorded for the selected data.")
 
-# Waste Spend
+# Waste spend
 if "waste_df" in locals() and not waste_df.empty:
     waste_amount = float(waste_df["Cost (₹)"].sum())
 
-    if total_cost > 0:
-        waste_ratio = (waste_amount / total_cost) * 100
-    else:
-        waste_ratio = 0
+    waste_ratio = (
+        (waste_amount / health_cost) * 100
+        if health_cost > 0 else 0
+    )
 
     if waste_ratio > 25:
         health_score -= 20
         health_notes.append(
-            f"🔴 Waste spend is high at {waste_ratio:.1f}% of total spend."
+            f"🔴 Waste spend is high at {waste_ratio:.1f}% of selected spend."
         )
     elif waste_ratio > 10:
         health_score -= 10
         health_notes.append(
-            f"🟠 Waste spend is {waste_ratio:.1f}% of total spend."
+            f"🟠 Waste spend is {waste_ratio:.1f}% of selected spend."
         )
     else:
-        health_notes.append("🟢 Waste spend is under control.")
+        health_notes.append(
+            f"🟢 Waste spend is under control at {waste_ratio:.1f}%."
+        )
 
 health_score = max(0, min(100, health_score))
 
