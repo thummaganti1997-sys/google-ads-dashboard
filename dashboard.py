@@ -1628,11 +1628,7 @@ if len(compare_df) >= 2:
     after_start = after_start_date.strftime("%d %b %Y")
     after_end = after_end_date.strftime("%d %b %Y")
 
-    st.caption(
-        f"📅 Before: {before_start} → {before_end} | "
-        f"After: {after_start} → {after_end}"
-    )
-        def period_summary(data):
+    
 
             impressions = float(data["Impressions"].sum())
             clicks = float(data["Clicks"].sum())
