@@ -2369,6 +2369,355 @@ for i, action in enumerate(
 ):
     st.write(
         f"**{i}. {action}**"
+    )
+# ==================================================
+# ADVANCED BEFORE VS AFTER PERFORMANCE INTELLIGENCE
+# ==================================================
+
+st.divider()
+st.header("📊 Before vs After Performance Intelligence")
+
+
+def advanced_period_summary(data):
+
+    impressions = (
+        float(data["Impressions"].sum())
+        if "Impressions" in data.columns
+        else 0
+    )
+
+    clicks = (
+        float(data["Clicks"].sum())
+        if "Clicks" in data.columns
+        else 0
+    )
+
+    cost = (
+        float(data["Cost (₹)"].sum())
+        if "Cost (₹)" in data.columns
+        else 0
+    )
+
+    conversions = (
+        float(data["Conversions"].sum())
+        if "Conversions" in data.columns
+        else 0
+    )
+
+    ctr = (
+        (clicks / impressions) * 100
+        if impressions > 0
+        else 0
+    )
+
+    cpc = (
+        cost / clicks
+        if clicks > 0
+        else 0
+    )
+
+    cpa = (
+        cost / conversions
+        if conversions > 0
+        else 0
+    )
+
+    conversion_rate = (
+        (conversions / clicks) * 100
+        if clicks > 0
+        else 0
+    )
+
+    return {
+        "Impressions": impressions,
+        "Clicks": clicks,
+        "Cost": cost,
+        "Conversions": conversions,
+        "CTR": ctr,
+        "CPC": cpc,
+        "CPA": cpa,
+        "Conversion Rate": conversion_rate
+    }
+
+
+# Use existing before/after data already created in dashboard
+if (
+    "before_df" in locals()
+    and "after_df" in locals()
+    and not before_df.empty
+    and not after_df.empty
+):
+
+    before_metrics = advanced_period_summary(before_df)
+    after_metrics = advanced_period_summary(after_df)
+
+    def pct_change(before_value, after_value):
+
+        if before_value == 0:
+            return 0
+
+        return (
+            (after_value - before_value)
+            / before_value
+        ) * 100
+
+
+    clicks_change = pct_change(
+        before_metrics["Clicks"],
+        after_metrics["Clicks"]
+    )
+
+    conversions_change = pct_change(
+        before_metrics["Conversions"],
+        after_metrics["Conversions"]
+    )
+
+    cost_change = pct_change(
+        before_metrics["Cost"],
+        after_metrics["Cost"]
+    )
+
+    ctr_change = pct_change(
+        before_metrics["CTR"],
+        after_metrics["CTR"]
+    )
+
+    cpc_change = pct_change(
+        before_metrics["CPC"],
+        after_metrics["CPC"]
+    )
+
+    cpa_change = pct_change(
+        before_metrics["CPA"],
+        after_metrics["CPA"]
+    )
+
+    conversion_rate_change = pct_change(
+        before_metrics["Conversion Rate"],
+        after_metrics["Conversion Rate"]
+    )
+
+
+    comparison_table = pd.DataFrame({
+
+        "Metric": [
+            "Impressions",
+            "Clicks",
+            "Cost (₹)",
+            "Conversions",
+            "CTR (%)",
+            "Avg CPC (₹)",
+            "CPA (₹)",
+            "Conversion Rate (%)"
+        ],
+
+        "Before": [
+            f"{before_metrics['Impressions']:,.0f}",
+            f"{before_metrics['Clicks']:,.0f}",
+            f"₹{before_metrics['Cost']:,.2f}",
+            f"{before_metrics['Conversions']:,.2f}",
+            f"{before_metrics['CTR']:.2f}%",
+            f"₹{before_metrics['CPC']:,.2f}",
+            f"₹{before_metrics['CPA']:,.2f}",
+            f"{before_metrics['Conversion Rate']:.2f}%"
+        ],
+
+        "After": [
+            f"{after_metrics['Impressions']:,.0f}",
+            f"{after_metrics['Clicks']:,.0f}",
+            f"₹{after_metrics['Cost']:,.2f}",
+            f"{after_metrics['Conversions']:,.2f}",
+            f"{after_metrics['CTR']:.2f}%",
+            f"₹{after_metrics['CPC']:,.2f}",
+            f"₹{after_metrics['CPA']:,.2f}",
+            f"{after_metrics['Conversion Rate']:.2f}%"
+        ],
+
+        "Change": [
+            f"{pct_change(before_metrics['Impressions'], after_metrics['Impressions']):+.1f}%",
+            f"{clicks_change:+.1f}%",
+            f"{cost_change:+.1f}%",
+            f"{conversions_change:+.1f}%",
+            f"{ctr_change:+.1f}%",
+            f"{cpc_change:+.1f}%",
+            f"{cpa_change:+.1f}%",
+            f"{conversion_rate_change:+.1f}%"
+        ]
+    })
+
+    st.dataframe(
+        comparison_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # ----------------------------------------------
+    # PERFORMANCE INTELLIGENCE SCORE
+    # ----------------------------------------------
+
+    intelligence_score = 50
+    intelligence_notes = []
+
+
+    if conversions_change > 10:
+        intelligence_score += 15
+        intelligence_notes.append(
+            f"🟢 Conversions improved by {conversions_change:.1f}%."
+        )
+
+    elif conversions_change < -10:
+        intelligence_score -= 15
+        intelligence_notes.append(
+            f"🔴 Conversions declined by {abs(conversions_change):.1f}%."
+        )
+
+
+    if cpa_change < -10:
+        intelligence_score += 15
+        intelligence_notes.append(
+            f"🟢 CPA improved by {abs(cpa_change):.1f}%."
+        )
+
+    elif cpa_change > 10:
+        intelligence_score -= 15
+        intelligence_notes.append(
+            f"🔴 CPA increased by {cpa_change:.1f}%."
+        )
+
+
+    if ctr_change > 10:
+        intelligence_score += 10
+        intelligence_notes.append(
+            f"🟢 CTR improved by {ctr_change:.1f}%."
+        )
+
+    elif ctr_change < -10:
+        intelligence_score -= 10
+        intelligence_notes.append(
+            f"🟠 CTR declined by {abs(ctr_change):.1f}%."
+        )
+
+
+    if conversion_rate_change > 10:
+        intelligence_score += 10
+        intelligence_notes.append(
+            f"🟢 Conversion Rate improved by "
+            f"{conversion_rate_change:.1f}%."
+        )
+
+    elif conversion_rate_change < -10:
+        intelligence_score -= 10
+        intelligence_notes.append(
+            f"🔴 Conversion Rate declined by "
+            f"{abs(conversion_rate_change):.1f}%."
+        )
+
+
+    intelligence_score = max(
+        0,
+        min(100, intelligence_score)
+    )
+
+
+    if intelligence_score >= 75:
+        intelligence_status = "🟢 Strong Improvement"
+
+    elif intelligence_score >= 55:
+        intelligence_status = "🟡 Stable / Improving"
+
+    elif intelligence_score >= 35:
+        intelligence_status = "🟠 Needs Attention"
+
+    else:
+        intelligence_status = "🔴 Performance Declining"
+
+
+    score_col1, score_col2 = st.columns(2)
+
+    with score_col1:
+
+        st.metric(
+            "Performance Intelligence Score",
+            f"{intelligence_score}/100"
+        )
+
+    with score_col2:
+
+        st.metric(
+            "Performance Trend",
+            intelligence_status
+        )
+
+    st.progress(
+        intelligence_score / 100
+    )
+
+
+    # ----------------------------------------------
+    # AI STYLE INTERPRETATION
+    # ----------------------------------------------
+
+    st.subheader("🧠 Performance Interpretation")
+
+    if intelligence_notes:
+
+        for note in intelligence_notes:
+            st.write(note)
+
+    else:
+
+        st.write(
+            "🟡 Performance is relatively stable between both periods."
+        )
+
+
+    # ----------------------------------------------
+    # NEXT ACTION
+    # ----------------------------------------------
+
+    st.subheader("🎯 Recommended Next Move")
+
+    if (
+        conversions_change > 10
+        and cpa_change < 0
+    ):
+
+        st.success(
+            "Performance improved: conversions increased while CPA decreased. "
+            "Protect the winning campaigns and scale budget gradually."
+        )
+
+    elif (
+        conversions_change < 0
+        and cpa_change > 0
+    ):
+
+        st.error(
+            "Performance worsened: conversions decreased while CPA increased. "
+            "Reduce waste, review search terms, bids and landing-page quality "
+            "before increasing budget."
+        )
+
+    elif cpa_change > 20:
+
+        st.warning(
+            "CPA increased significantly. Focus on expensive keywords, "
+            "search terms and conversion quality."
+        )
+
+    else:
+
+        st.info(
+            "Performance is mixed. Continue monitoring CTR, CPA, "
+            "conversion rate and search-term quality before making "
+            "large budget changes."
+        )
+
+else:
+
+    st.info(
+        "Before vs After data is not available for this selection."
     )    
 # ==================================================
 # ASK AI
