@@ -1988,7 +1988,111 @@ else:
         "🟢 Account performance looks stable. Continue monitoring."
     )
 
+# ==================================================
+# ACCOUNT HEALTH SCORE
+# ==================================================
 
+st.divider()
+st.header("🧠 Account Health Score")
+
+health_score = 100
+health_notes = []
+
+# CTR
+if overall_ctr < 3:
+    health_score -= 20
+    health_notes.append("🔴 CTR is low.")
+elif overall_ctr < 6:
+    health_score -= 10
+    health_notes.append("🟠 CTR needs improvement.")
+else:
+    health_notes.append("🟢 CTR is healthy.")
+
+# CPC
+if overall_cpc > 60:
+    health_score -= 15
+    health_notes.append("🔴 CPC is high.")
+elif overall_cpc > 40:
+    health_score -= 8
+    health_notes.append("🟠 CPC is moderately high.")
+else:
+    health_notes.append("🟢 CPC is under control.")
+
+# Conversion Rate
+if overall_conversion_rate < 2:
+    health_score -= 20
+    health_notes.append("🔴 Conversion Rate is low.")
+elif overall_conversion_rate < 5:
+    health_score -= 10
+    health_notes.append("🟠 Conversion Rate needs improvement.")
+else:
+    health_notes.append("🟢 Conversion Rate is healthy.")
+
+# CPA
+if total_conversions > 0:
+    if overall_cpa > 2000:
+        health_score -= 20
+        health_notes.append("🔴 CPA is high.")
+    elif overall_cpa > 1000:
+        health_score -= 10
+        health_notes.append("🟠 CPA needs monitoring.")
+    else:
+        health_notes.append("🟢 CPA is healthy.")
+else:
+    health_score -= 20
+    health_notes.append("🔴 No conversions recorded.")
+
+# Waste Spend
+if "waste_df" in locals() and not waste_df.empty:
+    waste_amount = float(waste_df["Cost (₹)"].sum())
+
+    if total_cost > 0:
+        waste_ratio = (waste_amount / total_cost) * 100
+    else:
+        waste_ratio = 0
+
+    if waste_ratio > 25:
+        health_score -= 20
+        health_notes.append(
+            f"🔴 Waste spend is high at {waste_ratio:.1f}% of total spend."
+        )
+    elif waste_ratio > 10:
+        health_score -= 10
+        health_notes.append(
+            f"🟠 Waste spend is {waste_ratio:.1f}% of total spend."
+        )
+    else:
+        health_notes.append("🟢 Waste spend is under control.")
+
+health_score = max(0, min(100, health_score))
+
+if health_score >= 80:
+    health_status = "🟢 Excellent"
+elif health_score >= 60:
+    health_status = "🟡 Good"
+elif health_score >= 40:
+    health_status = "🟠 Needs Attention"
+else:
+    health_status = "🔴 Critical"
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric(
+        "Account Health Score",
+        f"{health_score}/100"
+    )
+
+with col2:
+    st.metric(
+        "Health Status",
+        health_status
+    )
+
+st.progress(health_score / 100)
+
+for note in health_notes:
+    st.write(note)
 # ==================================================
 # ASK AI
 # ==================================================
