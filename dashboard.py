@@ -1475,8 +1475,106 @@ if "search_df" in locals() and not search_df.empty:
             negative_prompt = f"""
 You are a senior Google Ads search-term optimization specialist.
 
-Business:
-Home care services.
+BUSINESS:
+Harekrishna Home Care Services.
+
+CORE SERVICES:
+- Home care
+- Elderly care
+- Patient care
+- Nursing care
+- Nurse at home
+- Caretaker / Care taker
+- Baby care / Babysitter
+- Maid / Domestic help
+- Housekeeping
+- Cook services
+
+PROTECTED BRAND TERMS:
+- hare krishna
+- harekrishna
+- hare krishna home care
+- harekrishna home care
+- hare krishna home care services
+- harekrishna home care services
+
+PROTECTED SERVICE TERMS:
+- home care
+- homecare
+- elderly care
+- senior care
+- patient care
+- nursing
+- nurse
+- home nurse
+- caretaker
+- care taker
+- baby care
+- babysitter
+- nanny
+- maid
+- domestic help
+- housekeeping
+- housekeeper
+- cook
+
+IMPORTANT RULES:
+
+1. NEVER recommend the user's own Harekrishna / Hare Krishna brand
+   terms as negative keywords.
+
+2. NEVER recommend a core service term as a negative keyword
+   only because it has zero conversions.
+
+3. Zero conversions alone is NOT enough reason to block a term.
+
+4. If a protected service term appears with irrelevant intent,
+   recommend ONLY the irrelevant modifier as the negative.
+
+Examples:
+- "maid jobs hyderabad"
+  Negative = "jobs"
+  NOT "maid"
+
+- "nurse salary"
+  Negative = "salary"
+  NOT "nurse"
+
+- "caretaker course"
+  Negative = "course"
+  NOT "caretaker"
+
+- "home care jobs"
+  Negative = "jobs"
+  NOT "home care"
+
+5. Own-brand searches such as
+   "hare krishna home care services hyderabad"
+   must be KEEP.
+
+6. Maid and domestic help searches are valid business-service intent.
+   Do NOT recommend "maid" or "domestic help" as global negatives.
+
+7. If a term belongs to another valid service category,
+   mark it REVIEW and suggest campaign/ad-group routing.
+   Do not block the core service term.
+
+8. Recommend ADD AS NEGATIVE mainly for clearly irrelevant intent such as:
+   - jobs
+   - vacancies
+   - salary
+   - course
+   - training
+   - institute
+   - certification
+   - recruitment
+   - unrelated products
+   - clearly unrelated services
+
+9. Competitor brand terms should normally be REVIEW,
+   not automatically negative.
+
+10. Avoid broad negatives that could block qualified leads.
 
 Search terms with spend and zero conversions:
 
@@ -1490,7 +1588,7 @@ For each relevant search term, decide:
 2. REVIEW
 3. ADD AS NEGATIVE
 
-Return a clear table with:
+Return a clear Markdown table with:
 
 Search Term
 Spend
@@ -1501,15 +1599,18 @@ Suggested Match Type
 Reason
 Priority
 
-Important rules:
+After the table provide:
 
-- Do not recommend negative keywords only because they have zero conversions.
-- Protect high-intent home care, patient care, nursing care, elderly care and caretaker searches.
-- Recommend negatives mainly for irrelevant intent such as jobs, salary, course, training, free, hospital-only intent, unrelated locations, directories, competitors, informational searches, or unrelated services.
-- Avoid blocking valuable customer searches.
-- Clearly explain why each term should or should not be blocked.
+1. Recommended negatives to apply now
+2. Protected terms that must NOT be blocked
+3. Terms to monitor closely
+4. Campaign-routing suggestions where relevant
+5. Top 5 priority actions
+
+Be conservative with negative keywords.
+Protect qualified lead traffic.
+Never invent campaign data.
 """
-
             with st.spinner(
                 "AI is checking negative keyword opportunities..."
             ):
