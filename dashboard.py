@@ -1428,69 +1428,209 @@ else:
 
 
 # ==================================================
-# AI NEGATIVE KEYWORD RECOMMENDATIONS
+# ADVANCED AI NEGATIVE KEYWORD INTELLIGENCE V2
 # ==================================================
 
 st.divider()
-st.header("🚫 AI Negative Keyword Recommendations")
+st.header("🚫 Advanced AI Negative Keyword Intelligence")
+
+
+# --------------------------------------------------
+# CHECK SEARCH TERM DATA
+# --------------------------------------------------
 
 if "search_df" in locals() and not search_df.empty:
 
-    negative_candidates = search_df[
-        (search_df["Conversions"] == 0)
-        &
-        (search_df["Cost (₹)"] > 0)
-    ].copy()
+    required_columns = [
+        "Search Term",
+        "Clicks",
+        "Cost (₹)",
+        "Conversions"
+    ]
 
-    if not negative_candidates.empty:
+    missing_columns = [
+        col
+        for col in required_columns
+        if col not in search_df.columns
+    ]
+
+    if missing_columns:
+
+        st.warning(
+            "Required search-term columns are missing: "
+            + ", ".join(missing_columns)
+        )
+
+    else:
+
+        negative_candidates = search_df[
+            (search_df["Conversions"] == 0)
+            &
+            (search_df["Cost (₹)"] > 0)
+        ].copy()
 
         negative_candidates = negative_candidates.sort_values(
             "Cost (₹)",
             ascending=False
         )
 
-        st.dataframe(
-            negative_candidates[
+
+        # ==========================================
+        # SUMMARY METRICS
+        # ==========================================
+
+        if not negative_candidates.empty:
+
+            candidate_count = len(
+                negative_candidates
+            )
+
+            candidate_spend = float(
+                negative_candidates[
+                    "Cost (₹)"
+                ].sum()
+            )
+
+            candidate_clicks = float(
+                negative_candidates[
+                    "Clicks"
+                ].sum()
+            )
+
+            top_candidate_spend = float(
+                negative_candidates[
+                    "Cost (₹)"
+                ].max()
+            )
+
+
+            neg_col1, neg_col2, neg_col3, neg_col4 = (
+                st.columns(4)
+            )
+
+            with neg_col1:
+
+                st.metric(
+                    "Terms to Review",
+                    f"{candidate_count:,}"
+                )
+
+            with neg_col2:
+
+                st.metric(
+                    "Spend Under Review",
+                    f"₹{candidate_spend:,.2f}"
+                )
+
+            with neg_col3:
+
+                st.metric(
+                    "Clicks Under Review",
+                    f"{candidate_clicks:,.0f}"
+                )
+
+            with neg_col4:
+
+                st.metric(
+                    "Highest Single-Term Spend",
+                    f"₹{top_candidate_spend:,.2f}"
+                )
+
+
+            # ======================================
+            # RAW REVIEW TABLE
+            # ======================================
+
+            st.subheader(
+                "🔍 Zero-Conversion Search Terms to Review"
+            )
+
+
+            display_columns = [
+                "Search Term"
+            ]
+
+            if "Campaign" in negative_candidates.columns:
+                display_columns.append(
+                    "Campaign"
+                )
+
+            display_columns.extend(
                 [
-                    "Search Term",
-                    "Campaign",
                     "Clicks",
                     "Cost (₹)",
                     "Conversions"
                 ]
-            ],
-            use_container_width=True,
-            hide_index=True
-        )
+            )
 
-        if st.button(
-            "Generate AI Negative Keyword Suggestions",
-            key="negative_keyword_ai_button"
-        ):
 
-            negative_context = negative_candidates.head(
-                30
-            ).to_string(index=False)
+            st.dataframe(
+                negative_candidates[
+                    display_columns
+                ],
+                use_container_width=True,
+                hide_index=True
+            )
 
-            negative_prompt = f"""
-You are a senior Google Ads search-term optimization specialist.
+
+            st.info(
+                "Zero conversions alone does NOT mean a search term "
+                "should become a negative keyword. "
+                "The AI below protects your brand and core services."
+            )
+
+
+            # ======================================
+            # AI ANALYSIS BUTTON
+            # ======================================
+
+            if st.button(
+                "🧠 Run Advanced Negative Keyword Intelligence",
+                key="advanced_negative_keyword_v2_button"
+            ):
+
+                negative_context = (
+                    negative_candidates
+                    .head(50)
+                    .to_string(
+                        index=False
+                    )
+                )
+
+
+                negative_prompt = f"""
+You are a senior Google Ads Search Term Intelligence specialist.
+
+Your job is NOT to create as many negative keywords as possible.
+
+Your job is to protect qualified leads while identifying only genuinely wasteful or irrelevant traffic.
 
 BUSINESS:
 Harekrishna Home Care Services.
 
-CORE SERVICES:
+PRIMARY LOCATION:
+Hyderabad.
+
+CORE BUSINESS SERVICES:
 - Home care
 - Elderly care
+- Senior care
 - Patient care
 - Nursing care
 - Nurse at home
-- Caretaker / Care taker
-- Baby care / Babysitter
-- Maid / Domestic help
+- Home nurse
+- Caretaker
+- Care taker
+- Baby care
+- Babysitter
+- Nanny
+- Maid
+- Domestic help
 - Housekeeping
+- Housekeeper
 - Cook services
 
-PROTECTED BRAND TERMS:
+PROTECTED OWN-BRAND TERMS:
 - hare krishna
 - harekrishna
 - hare krishna home care
@@ -1498,7 +1638,7 @@ PROTECTED BRAND TERMS:
 - hare krishna home care services
 - harekrishna home care services
 
-PROTECTED SERVICE TERMS:
+PROTECTED CORE SERVICE TERMS:
 - home care
 - homecare
 - elderly care
@@ -1518,130 +1658,304 @@ PROTECTED SERVICE TERMS:
 - housekeeper
 - cook
 
-IMPORTANT RULES:
+
+==================================================
+MANDATORY PROTECTION RULES
+==================================================
 
 1. NEVER recommend the user's own Harekrishna / Hare Krishna brand
-   terms as negative keywords.
+   as a negative keyword.
 
-2. NEVER recommend a core service term as a negative keyword
-   only because it has zero conversions.
+2. Own-brand searches must normally be classified as:
+   KEEP
+   Intent = BRAND / LEAD
+   Risk = PROTECTED
 
-3. Zero conversions alone is NOT enough reason to block a term.
+3. NEVER recommend a core service term as a negative keyword
+   merely because it has zero conversions.
 
-4. If a protected service term appears with irrelevant intent,
-   recommend ONLY the irrelevant modifier as the negative.
+4. Zero conversions alone is NOT enough evidence to block a term.
+
+5. Maid and domestic-help searches are valid services for this business.
+   NEVER recommend "maid" or "domestic help" as global negatives.
+
+6. Nursing, nurse, caretaker, elderly care, patient care,
+   baby care and home care are protected service themes.
+
+7. If a protected service appears with irrelevant intent,
+   block ONLY the irrelevant modifier.
 
 Examples:
-- "maid jobs hyderabad"
-  Negative = "jobs"
-  NOT "maid"
 
-- "nurse salary"
-  Negative = "salary"
-  NOT "nurse"
+"maid jobs hyderabad"
+Suggested Negative = jobs
+NOT maid
 
-- "caretaker course"
-  Negative = "course"
-  NOT "caretaker"
+"nurse salary"
+Suggested Negative = salary
+NOT nurse
 
-- "home care jobs"
-  Negative = "jobs"
-  NOT "home care"
+"caretaker vacancy"
+Suggested Negative = vacancy
+NOT caretaker
 
-5. Own-brand searches such as
-   "hare krishna home care services hyderabad"
-   must be KEEP.
+"home care course"
+Suggested Negative = course
+NOT home care
 
-6. Maid and domestic help searches are valid business-service intent.
-   Do NOT recommend "maid" or "domestic help" as global negatives.
+"nursing training institute"
+Suggested Negative = training
+or institute
+NOT nursing
 
-7. If a term belongs to another valid service category,
-   mark it REVIEW and suggest campaign/ad-group routing.
-   Do not block the core service term.
+8. If a search term is a valid service but may belong in another campaign,
+   classify it as REVIEW and suggest CAMPAIGN ROUTING.
+   Do NOT make the valid service itself negative.
 
-8. Recommend ADD AS NEGATIVE mainly for clearly irrelevant intent such as:
-   - jobs
-   - vacancies
-   - salary
-   - course
-   - training
-   - institute
-   - certification
-   - recruitment
-   - unrelated products
-   - clearly unrelated services
+9. Competitor-brand searches should normally be REVIEW,
+   not automatically ADD AS NEGATIVE.
 
-9. Competitor brand terms should normally be REVIEW,
-   not automatically negative.
+10. Wrong-location terms should be carefully reviewed.
+    Do not block a whole city/state unless the location intent is clearly
+    outside the business target and there is no valid reason to keep it.
 
-10. Avoid broad negatives that could block qualified leads.
+11. Never invent conversion, lead-quality, campaign or revenue data.
 
-Search terms with spend and zero conversions:
+
+==================================================
+INTENT CLASSIFICATION
+==================================================
+
+Classify each search term into ONE primary intent:
+
+LEAD
+BRAND
+JOB
+TRAINING
+INFORMATIONAL
+COMPETITOR
+WRONG LOCATION
+UNRELATED SERVICE
+AMBIGUOUS
+
+
+==================================================
+ACTION CLASSIFICATION
+==================================================
+
+Choose ONE:
+
+KEEP
+REVIEW
+ADD AS NEGATIVE
+
+
+==================================================
+RISK CLASSIFICATION
+==================================================
+
+Choose ONE:
+
+PROTECTED
+LOW RISK TO BLOCK
+MEDIUM RISK
+HIGH RISK TO BLOCK
+
+
+==================================================
+CONFIDENCE SCORE
+==================================================
+
+Give a Confidence Score from 0% to 100%.
+
+Use high confidence only when intent is very clear.
+
+Examples:
+
+jobs / vacancies / salary / recruitment:
+usually high-confidence negative modifiers.
+
+course / training / institute / certification:
+usually high-confidence negative modifiers.
+
+own brand:
+100% protected.
+
+valid home-care service:
+high confidence KEEP.
+
+ambiguous or competitor term:
+usually REVIEW rather than automatic negative.
+
+
+==================================================
+MATCH TYPE RULES
+==================================================
+
+For negative recommendations choose:
+
+Phrase
+or
+Exact
+
+Prefer conservative match types.
+
+Do NOT recommend broad blocking that could remove qualified traffic.
+
+
+==================================================
+COMMON SAFE NEGATIVE INTENT
+==================================================
+
+These may be negative modifiers when clearly irrelevant:
+
+jobs
+job
+vacancy
+vacancies
+salary
+career
+careers
+recruitment
+resume
+course
+courses
+training
+institute
+certification
+exam
+
+But first verify that the modifier is genuinely irrelevant.
+
+
+==================================================
+CAMPAIGN ROUTING
+==================================================
+
+If the term is relevant but belongs to another service category,
+do NOT block it.
+
+Instead recommend routing such as:
+
+Nursing Campaign
+Patient Care Campaign
+Elderly Care Campaign
+Baby Care Campaign
+Domestic Help Campaign
+Caretaker Campaign
+
+
+==================================================
+SEARCH TERM DATA
+==================================================
+
+The following terms have spend and zero conversions:
 
 {negative_context}
 
-Analyze carefully.
 
-For each relevant search term, decide:
+==================================================
+OUTPUT TABLE
+==================================================
 
-1. KEEP
-2. REVIEW
-3. ADD AS NEGATIVE
-
-Return a clear Markdown table with:
+Return a clear Markdown table with these columns:
 
 Search Term
+Campaign
 Spend
 Clicks
+Intent
 Recommended Action
 Suggested Negative Keyword
 Suggested Match Type
+Confidence Score
+Risk Level
+Campaign Routing
 Reason
 Priority
 
-After the table provide:
 
-1. Recommended negatives to apply now
-2. Protected terms that must NOT be blocked
-3. Terms to monitor closely
-4. Campaign-routing suggestions where relevant
-5. Top 5 priority actions
+==================================================
+PRIORITY RULES
+==================================================
 
-Be conservative with negative keywords.
-Protect qualified lead traffic.
-Never invent campaign data.
+HIGH:
+Clearly irrelevant intent + meaningful spend/clicks.
+
+MEDIUM:
+Ambiguous, competitor, wrong-location or routing issue.
+
+LOW:
+Low evidence, small data sample or potentially relevant intent.
+
+
+==================================================
+AFTER THE TABLE
+==================================================
+
+Provide these sections:
+
+1. 🔴 Safe Negatives to Apply Now
+   - Only high-confidence, low-risk negatives.
+
+2. 🛡 Protected Terms — Never Block
+   - Own brand and valid service terms found in the data.
+
+3. 🟡 Review Before Blocking
+   - Ambiguous / competitor / location terms.
+
+4. 🔀 Campaign Routing Opportunities
+   - Relevant terms that belong in another campaign.
+
+5. 💸 Highest Waste-Priority Terms
+   - Rank by actual spend from the supplied data.
+   - Do not invent savings.
+
+6. 🎯 Top 5 Actions
+   - Practical next steps.
+
+IMPORTANT:
+Be conservative.
+Protect qualified customer traffic.
+Do not force a negative recommendation when no safe negative exists.
+Never invent data.
 """
-            with st.spinner(
-                "AI is checking negative keyword opportunities..."
-            ):
 
-                negative_ai_response = (
-                    openai_client.responses.create(
-                        model="gpt-5.4-mini",
-                        input=negative_prompt
+
+                with st.spinner(
+                    "AI is classifying search-term intent and risk..."
+                ):
+
+                    negative_ai_response = (
+                        openai_client.responses.create(
+                            model="gpt-5.4-mini",
+                            input=negative_prompt
+                        )
                     )
+
+
+                st.subheader(
+                    "🤖 Advanced Negative Keyword Intelligence"
                 )
 
-            st.subheader(
-                "🤖 AI Negative Keyword Analysis"
+                st.write(
+                    negative_ai_response.output_text
+                )
+
+
+        else:
+
+            st.success(
+                "No search terms with spend and zero conversions "
+                "were found for the selected data."
             )
 
-            st.write(
-                negative_ai_response.output_text
-            )
-
-    else:
-
-        st.success(
-            "No zero-conversion search terms with spend found."
-        )
 
 else:
 
     st.info(
         "Search term data is not available."
     )
-
 
    # ==================================================
 # AI PRIORITY ACTION CENTER
