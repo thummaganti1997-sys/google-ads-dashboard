@@ -2128,6 +2128,194 @@ st.progress(health_score / 100)
 for note in health_notes:
     st.write(note)
 # ==================================================
+# WASTE RISK + BUDGET REALLOCATION INTELLIGENCE
+# ==================================================
+
+st.divider()
+st.header("🚨 Waste Risk & Budget Intelligence")
+
+# --------------------------------------------------
+# WASTE RISK SCORE
+# --------------------------------------------------
+
+selected_spend = (
+    float(filtered_df["Cost (₹)"].sum())
+    if "Cost (₹)" in filtered_df.columns
+    else 0
+)
+
+selected_conversions = (
+    float(filtered_df["Conversions"].sum())
+    if "Conversions" in filtered_df.columns
+    else 0
+)
+
+waste_amount = 0.0
+
+if "waste_df" in locals() and not waste_df.empty:
+    if "Cost (₹)" in waste_df.columns:
+        waste_amount = float(waste_df["Cost (₹)"].sum())
+
+waste_ratio = (
+    (waste_amount / selected_spend) * 100
+    if selected_spend > 0
+    else 0
+)
+
+if waste_ratio >= 30:
+    waste_risk_score = 90
+    waste_risk_status = "🔴 Critical"
+elif waste_ratio >= 20:
+    waste_risk_score = 75
+    waste_risk_status = "🟠 High"
+elif waste_ratio >= 10:
+    waste_risk_score = 50
+    waste_risk_status = "🟡 Moderate"
+elif waste_ratio > 0:
+    waste_risk_score = 25
+    waste_risk_status = "🟢 Low"
+else:
+    waste_risk_score = 0
+    waste_risk_status = "🟢 Very Low"
+
+risk_col1, risk_col2, risk_col3 = st.columns(3)
+
+with risk_col1:
+    st.metric(
+        "Waste Risk Score",
+        f"{waste_risk_score}/100"
+    )
+
+with risk_col2:
+    st.metric(
+        "Waste Risk",
+        waste_risk_status
+    )
+
+with risk_col3:
+    st.metric(
+        "Potential Waste Spend",
+        f"₹{waste_amount:,.2f}"
+    )
+
+st.progress(waste_risk_score / 100)
+
+st.write(
+    f"Potential waste represents **{waste_ratio:.1f}%** "
+    f"of selected spend."
+)
+
+# --------------------------------------------------
+# BUDGET REALLOCATION SUGGESTIONS
+# --------------------------------------------------
+
+st.subheader("💰 Budget Reallocation Suggestions")
+
+budget_actions = []
+
+if not filtered_df.empty:
+
+    budget_df = filtered_df.copy()
+
+    if (
+        "Cost (₹)" in budget_df.columns
+        and "Conversions" in budget_df.columns
+    ):
+
+        budget_df["AI CPA"] = budget_df.apply(
+            lambda row:
+                row["Cost (₹)"] / row["Conversions"]
+                if row["Conversions"] > 0
+                else float("inf"),
+            axis=1
+        )
+
+        converting_df = budget_df[
+            budget_df["Conversions"] > 0
+        ].copy()
+
+        zero_conversion_df = budget_df[
+            (budget_df["Cost (₹)"] > 0)
+            & (budget_df["Conversions"] == 0)
+        ].copy()
+
+        if not converting_df.empty:
+
+            best_campaign = converting_df.loc[
+                converting_df["AI CPA"].idxmin()
+            ]
+
+            best_campaign_name = (
+                best_campaign["Campaign"]
+                if "Campaign" in converting_df.columns
+                else "Best-performing campaign"
+            )
+
+            budget_actions.append(
+                "🟢 **Increase carefully:** "
+                f"{best_campaign_name} has the strongest CPA "
+                f"at ₹{best_campaign['AI CPA']:,.2f}."
+            )
+
+            worst_campaign = converting_df.loc[
+                converting_df["AI CPA"].idxmax()
+            ]
+
+            worst_campaign_name = (
+                worst_campaign["Campaign"]
+                if "Campaign" in converting_df.columns
+                else "Higher-CPA campaign"
+            )
+
+            if (
+                worst_campaign["AI CPA"]
+                > best_campaign["AI CPA"] * 1.5
+            ):
+                budget_actions.append(
+                    "🟠 **Review / reduce:** "
+                    f"{worst_campaign_name} has a higher CPA "
+                    f"at ₹{worst_campaign['AI CPA']:,.2f}."
+                )
+
+        if not zero_conversion_df.empty:
+
+            highest_waste_campaign = zero_conversion_df.loc[
+                zero_conversion_df["Cost (₹)"].idxmax()
+            ]
+
+            zero_campaign_name = (
+                highest_waste_campaign["Campaign"]
+                if "Campaign" in zero_conversion_df.columns
+                else "Zero-conversion campaign"
+            )
+
+            budget_actions.append(
+                "🔴 **Reduce or pause for review:** "
+                f"{zero_campaign_name} spent "
+                f"₹{highest_waste_campaign['Cost (₹)']:,.2f} "
+                "with zero conversions."
+            )
+
+if waste_ratio >= 10:
+    budget_actions.append(
+        "🚫 Review search terms and add relevant negative "
+        "keywords before increasing total budget."
+    )
+
+if not budget_actions:
+    budget_actions.append(
+        "🟢 Current budget distribution looks stable. "
+        "Continue monitoring CPA and conversion volume."
+    )
+
+for i, action in enumerate(
+    budget_actions[:5],
+    start=1
+):
+    st.write(
+        f"**{i}. {action}**"
+    )    
+# ==================================================
 # ASK AI
 # ==================================================
 
