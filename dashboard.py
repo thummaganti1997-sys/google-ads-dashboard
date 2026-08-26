@@ -1572,24 +1572,66 @@ if "daily_df" in locals() and not daily_df.empty:
         .reset_index(drop=True)
     )
 
-    if len(compare_df) >= 2:
+    # ==================================================
+# BEFORE VS AFTER - CALENDAR DATE SPLIT
+# ==================================================
 
-        middle = len(compare_df) // 2
+if len(compare_df) >= 2:
 
-        before_df = compare_df.iloc[:middle].copy()
-        after_df = compare_df.iloc[middle:].copy()
+    compare_df = compare_df.copy()
 
-        before_start = before_df["Date"].iloc[0].strftime("%d %b %Y")
-        before_end = before_df["Date"].iloc[-1].strftime("%d %b %Y")
+    compare_df["Date"] = pd.to_datetime(
+        compare_df["Date"],
+        errors="coerce"
+    )
 
-        after_start = after_df["Date"].iloc[0].strftime("%d %b %Y")
-        after_end = after_df["Date"].iloc[-1].strftime("%d %b %Y")
+    compare_df = (
+        compare_df
+        .dropna(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
 
-        st.caption(
-            f"📅 Before: {before_start} → {before_end} | "
-            f"After: {after_start} → {after_end}"
-        )
+    period_start = compare_df["Date"].min().normalize()
+    period_end = compare_df["Date"].max().normalize()
 
+    total_days = (period_end - period_start).days + 1
+
+    before_days = total_days // 2
+
+    before_start_date = period_start
+    before_end_date = (
+        before_start_date
+        + timedelta(days=before_days - 1)
+    )
+
+    after_start_date = (
+        before_end_date
+        + timedelta(days=1)
+    )
+
+    after_end_date = period_end
+
+    before_df = compare_df[
+        (compare_df["Date"] >= before_start_date)
+        & (compare_df["Date"] <= before_end_date)
+    ].copy()
+
+    after_df = compare_df[
+        (compare_df["Date"] >= after_start_date)
+        & (compare_df["Date"] <= after_end_date)
+    ].copy()
+
+    before_start = before_start_date.strftime("%d %b %Y")
+    before_end = before_end_date.strftime("%d %b %Y")
+
+    after_start = after_start_date.strftime("%d %b %Y")
+    after_end = after_end_date.strftime("%d %b %Y")
+
+    st.caption(
+        f"📅 Before: {before_start} → {before_end} | "
+        f"After: {after_start} → {after_end}"
+    )
         def period_summary(data):
 
             impressions = float(data["Impressions"].sum())
