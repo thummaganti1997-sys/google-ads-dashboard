@@ -658,7 +658,7 @@ try:
         st.divider()
 
 
-                # ==================================================
+                       # ==================================================
         # CAMPAIGN COMPARISON
         # ==================================================
 
@@ -675,8 +675,7 @@ try:
             width="stretch"
         )
 
-
-                search_query = f"""
+        search_query = f"""
             SELECT
                 search_term_view.search_term,
                 campaign.name,
@@ -693,7 +692,7 @@ try:
         search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
-        )
+        ) 
         # --------------------------
         # TABLE
         # --------------------------
