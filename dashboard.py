@@ -1805,7 +1805,7 @@ try:
                             )
 
                             batch_cache_payload = (
-                                f"v3|{date_option}|{selected_campaign}|"
+                                f"v4|{date_option}|{selected_campaign}|"
                                 f"{batch_context}"
                             )
 
@@ -1852,11 +1852,19 @@ hare krishna home care services
 harekrishna home care services
 
 CLASSIFICATION RULES:
-1. COMPETITOR only when the search term clearly contains another
-   business, agency, hospital, clinic, old-age-home facility,
-   nursing-home facility, platform, organization or brand name.
-2. Extract ONLY the exact competitor/business name visibly present
-   in the search term. Never invent or expand a name from outside knowledge.
+1. COMPETITOR only when the search term contains a CLEAR, DISTINCTIVE business/brand/provider name.
+   A service category by itself is NEVER a competitor name.
+2. A competitor name must contain at least one distinctive naming token beyond generic words such as
+   home, care, services, service, nursing, nurse, agency, caretaker, baby, nanny, old age home,
+   healthcare, health care, hospital, clinic, senior, elderly, Hyderabad, near me, on call.
+7. Examples that are NOT competitor names by themselves: "nursing on call agency", "baby care agency",
+   "nearest home care agency", "old age home", "nursing home", "home care services".
+8. If a term only looks like a generic service/category or you are unsure whether the leading word is
+   actually a business name, classify AMBIGUOUS + REVIEW, NOT COMPETITOR.
+9. Extract ONLY the shortest clear competitor/business name visibly present in the search term.
+   Never invent, expand, or infer a company name from outside knowledge.
+10. Normalize obvious query suffixes out of the competitor name: remove city/location, phone number,
+   photos, reviews, near me, and service-intent suffixes when they are not part of the visible brand name.
 3. Generic core-service searches without another brand are GENERIC SERVICE.
 4. Harekrishna / Hare Krishna terms are OWN BRAND and protected.
 5. A named old age home, nursing home, hospital or clinic is a COMPETITOR
@@ -1864,17 +1872,17 @@ CLASSIFICATION RULES:
 6. Generic old-age-home, nursing-home, hospital or clinic queries are not
    the same as the business's core in-home service. Classify them as
    AMBIGUOUS or UNRELATED when appropriate and normally REVIEW.
-7. Doctor / home-doctor queries are not automatically core services.
+11. Doctor / home-doctor queries are not automatically core services.
    Without a clear brand, normally use AMBIGUOUS or UNRELATED + REVIEW.
-8. Massage, therapy, physiotherapy and similar non-core services are not
+12. Massage, therapy, physiotherapy and similar non-core services are not
    automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
-9. Wrong-location searches outside Hyderabad/Telangana should not be
+13. Wrong-location searches outside Hyderabad/Telangana should not be
    automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
-10. Competitor terms should normally be REVIEW, not automatically blocked.
-11. If a competitor term converted, keep the action conservative and note
+14. Competitor terms should normally be REVIEW, not automatically blocked.
+15. If a competitor term converted, keep the action conservative and note
     that it may be valuable traffic.
-12. Use ONLY the supplied search-term text and supplied metrics.
-13. Return one result for EVERY supplied Row ID.
+16. Use ONLY the supplied search-term text and supplied metrics.
+17. Return one result for EVERY supplied Row ID.
 
 ALLOWED Type values:
 OWN BRAND
