@@ -1450,15 +1450,16 @@ try:
 
         # ==================================================
         # COMPETITOR SEARCH-TERM INTELLIGENCE
-        # TOKEN-EFFICIENT AI VERSION
+        # FULL-DATA LOCAL SCAN + TOP-15 AI CANDIDATES
         # ==================================================
 
         st.divider()
         st.header("🏁 Competitor Intelligence")
 
         st.caption(
-            "This section identifies competitor-style brand searches from "
-            "your Google Ads search-term data. It is not Auction Insights."
+            "Scans the full selected-period search-term dataset locally, "
+            "then sends only the Top 15 likely brand / competitor / ambiguous "
+            "terms to AI. This is search-term intelligence, not Auction Insights."
         )
 
         if "search_df" in locals() and not search_df.empty:
@@ -1498,11 +1499,154 @@ try:
 
                 if not competitor_source_df.empty:
 
+                    # ------------------------------------------
+                    # LOCAL BRAND-LIKELIHOOD SCAN
+                    # No OpenAI tokens are used here.
+                    # ------------------------------------------
+
+                    own_brand_phrases = [
+                        "hare krishna",
+                        "harekrishna",
+                        "hare krishna home care",
+                        "harekrishna home care",
+                        "hare krishna home care services",
+                        "harekrishna home care services"
+                    ]
+
+                    generic_competitor_words = {
+                        "home", "care", "homecare", "service", "services",
+                        "elderly", "senior", "seniors", "old", "age", "aged",
+                        "patient", "patients", "nursing", "nurse", "nurses",
+                        "caretaker", "caretakers", "taker", "attendant", "attendants",
+                        "baby", "babysitter", "babysitters", "nanny", "nannies",
+                        "maid", "maids", "domestic", "help", "housekeeping",
+                        "housekeeper", "housekeepers", "cook", "cooks",
+                        "doctor", "doctors", "medical", "health", "healthcare",
+                        "at", "in", "for", "of", "the", "and", "to", "with",
+                        "near", "me", "my", "our", "your", "best", "top",
+                        "good", "professional", "private", "personal", "personalized",
+                        "24", "7", "24x7", "hour", "hours", "day", "days",
+                        "hyderabad", "secunderabad", "telangana", "india"
+                    }
+
+                    def competitor_brand_score(search_term):
+                        term = str(search_term).strip().lower()
+
+                        if not term:
+                            return -999
+
+                        if any(
+                            brand_phrase in term
+                            for brand_phrase in own_brand_phrases
+                        ):
+                            return -999
+
+                        cleaned = "".join(
+                            ch if ch.isalnum() else " "
+                            for ch in term
+                        )
+
+                        tokens = [
+                            token
+                            for token in cleaned.split()
+                            if token
+                        ]
+
+                        if not tokens:
+                            return -999
+
+                        unknown_tokens = [
+                            token
+                            for token in tokens
+                            if token not in generic_competitor_words
+                            and not token.isdigit()
+                        ]
+
+                        # Unknown words are useful signals for names/brands.
+                        score = len(set(unknown_tokens)) * 3
+
+                        # Short unknown terms can be a one-word brand.
+                        if len(tokens) <= 3 and unknown_tokens:
+                            score += 2
+
+                        # Terms with explicit agency/company-style wording
+                        # deserve extra review, but AI still makes the final call.
+                        company_markers = {
+                            "agency", "company", "centre", "center",
+                            "hospital", "foundation", "solutions"
+                        }
+
+                        if any(
+                            marker in tokens
+                            for marker in company_markers
+                        ):
+                            score += 2
+
+                        return score
+
+                    competitor_source_df[
+                        "_Brand Candidate Score"
+                    ] = competitor_source_df[
+                        "Search Term"
+                    ].apply(competitor_brand_score)
+
+                    # First preference: brand-like / ambiguous terms found
+                    # anywhere in the full selected-period dataset.
+                    competitor_candidate_df = competitor_source_df[
+                        competitor_source_df[
+                            "_Brand Candidate Score"
+                        ] > 0
+                    ].copy()
+
+                    competitor_candidate_df = competitor_candidate_df.sort_values(
+                        ["_Brand Candidate Score", "Cost (₹)"],
+                        ascending=[False, False]
+                    )
+
+                    # If fewer than 15 brand-like candidates exist, fill the
+                    # remaining slots with highest-spend non-own-brand terms.
+                    if len(competitor_candidate_df) < 15:
+
+                        selected_candidate_indexes = set(
+                            competitor_candidate_df.index.tolist()
+                        )
+
+                        fallback_df = competitor_source_df[
+                            ~competitor_source_df.index.isin(
+                                selected_candidate_indexes
+                            )
+                        ].copy()
+
+                        fallback_df = fallback_df[
+                            fallback_df[
+                                "_Brand Candidate Score"
+                            ] > -999
+                        ].sort_values(
+                            "Cost (₹)",
+                            ascending=False
+                        )
+
+                        competitor_candidate_df = pd.concat(
+                            [
+                                competitor_candidate_df,
+                                fallback_df.head(
+                                    15 - len(competitor_candidate_df)
+                                )
+                            ],
+                            ignore_index=False
+                        )
+
+                    competitor_candidate_df = (
+                        competitor_candidate_df
+                        .head(15)
+                        .copy()
+                    )
+
                     comp_col1, comp_col2, comp_col3 = st.columns(3)
 
                     with comp_col1:
                         st.metric(
-                            "Search Terms Available",
+                            "Search Terms Scanned",
                             f"{len(competitor_source_df):,}"
                         )
 
@@ -1514,24 +1658,25 @@ try:
 
                     with comp_col3:
                         st.metric(
-                            "AI Terms Per Run",
-                            "Top 15"
+                            "AI Candidate Terms",
+                            f"Top {len(competitor_candidate_df)}"
                         )
 
                     st.info(
-                        "The dashboard keeps the full search-term dataset. "
-                        "Competitor AI sends only the Top 15 highest-spend "
-                        "search terms to OpenAI to control token usage."
+                        "Full search-term data is scanned locally first. "
+                        "AI receives only up to 15 likely brand / competitor / "
+                        "ambiguous candidates, so competitor names can be found "
+                        "even when they are not among the highest-spend generic terms."
                     )
 
                     if st.button(
                         "🧠 Run Competitor Intelligence",
-                        key="competitor_intelligence_button_v1"
+                        key="competitor_intelligence_button_v2"
                     ):
 
                         competitor_ai_columns = ["Search Term"]
 
-                        if "Campaign" in competitor_source_df.columns:
+                        if "Campaign" in competitor_candidate_df.columns:
                             competitor_ai_columns.append("Campaign")
 
                         competitor_ai_columns.extend(
@@ -1542,13 +1687,9 @@ try:
                             ]
                         )
 
-                        competitor_ai_df = (
-                            competitor_source_df[
-                                competitor_ai_columns
-                            ]
-                            .head(15)
-                            .copy()
-                        )
+                        competitor_ai_df = competitor_candidate_df[
+                            competitor_ai_columns
+                        ].copy()
 
                         competitor_context = (
                             competitor_ai_df
@@ -1556,26 +1697,26 @@ try:
                         )
 
                         competitor_cache_key = (
-                            f"{date_option}|{selected_campaign}|"
+                            f"v2|{date_option}|{selected_campaign}|"
                             f"{competitor_context}"
                         )
 
                         if (
                             st.session_state.get(
-                                "competitor_ai_cache_key"
+                                "competitor_ai_cache_key_v2"
                             ) == competitor_cache_key
                             and st.session_state.get(
-                                "competitor_ai_cache_text"
+                                "competitor_ai_cache_text_v2"
                             )
                         ):
 
                             competitor_ai_text = st.session_state[
-                                "competitor_ai_cache_text"
+                                "competitor_ai_cache_text_v2"
                             ]
 
                             st.success(
                                 "Showing the saved result for the same "
-                                "date range and campaign. No new AI call was used."
+                                "candidate data. No new AI call was used."
                             )
 
                         else:
@@ -1604,26 +1745,34 @@ hare krishna home care services
 harekrishna home care services
 
 IMPORTANT RULES:
-1. Identify a competitor only when the supplied search term clearly
-   contains another business, agency, hospital, platform or brand name.
-2. Never invent competitor names that are not present in the supplied data.
-3. Do not classify generic searches such as "home care services near me",
-   "nurse near me", "caretaker hyderabad" or other service queries as competitors.
-4. Own Harekrishna / Hare Krishna brand searches are OWN BRAND, never competitor.
-5. Competitor searches should normally be REVIEW, not automatically blocked.
-6. Zero conversions alone is not enough reason to block a competitor term.
-7. If a competitor term converted, clearly highlight that it may be valuable traffic.
-8. If a competitor term has spend and zero conversions, recommend REVIEW first.
-9. Do not invent conversion quality, revenue, impression share or competitor market share.
-10. Use only the data below.
+1. Identify a competitor only when the supplied search term clearly contains
+   another business, agency, hospital, platform, organization or brand name.
+2. Extract the exact competitor/business name visible in the search term.
+3. Never invent a competitor name that is not visible in the supplied term.
+4. Generic service words are NOT competitor names.
+5. Own Harekrishna / Hare Krishna terms are OWN BRAND and protected.
+6. Doctor/home-doctor terms are NOT automatically a valid core service.
+   If no clear brand is present, classify them as AMBIGUOUS or UNRELATED
+   when appropriate rather than automatically KEEP.
+7. Competitor searches should normally be REVIEW, not automatically blocked.
+8. If a competitor term converted, clearly highlight that it may be valuable traffic.
+9. If a competitor term has spend and zero conversions, recommend REVIEW first.
+10. Never invent revenue, impression share, market share or conversion quality.
+11. Use only the supplied search-term data.
 
-SEARCH-TERM DATA TO ANALYZE:
-These are only the Top 15 highest-spend search terms for this AI run.
+SEARCH-TERM CANDIDATES TO ANALYZE:
+These candidates were selected from the FULL selected-period search-term dataset
+using a local brand-likelihood scan. Only up to 15 candidates are sent to AI.
 
 {competitor_context}
 
 Return a concise Markdown table with these columns:
-Search Term | Campaign | Spend | Clicks | Conversions | Type | Competitor / Brand Detected | Recommended Action | Risk | Reason
+Search Term | Competitor Name | Campaign | Spend | Clicks | Conversions | Type | Recommended Action | Risk | Reason
+
+Competitor Name rules:
+- If Type = COMPETITOR, show the exact competitor/business/brand name found in the search term.
+- If no competitor name is clearly present, show —
+- Never turn generic words such as home care, nurse, caretaker, doctor, service, Hyderabad into competitor names.
 
 Type must be one of:
 OWN BRAND / COMPETITOR / GENERIC SERVICE / AMBIGUOUS / UNRELATED
@@ -1632,29 +1781,31 @@ Recommended Action must be one of:
 KEEP / REVIEW / CONSIDER NEGATIVE
 
 After the table provide only:
-1. Competitors Detected
-2. Competitor Terms That Converted
-3. Competitor Terms With Spend + Zero Conversions
-4. Own Brand Terms Protected
-5. Top 3 Competitor Actions
+1. 🏢 Competitor Names Detected
+   - List each unique competitor name found in these terms.
+   - For each name, mention the supplied search term(s), spend, clicks and conversions.
+2. ✅ Competitor Terms That Converted
+3. 💸 Competitor Terms With Spend + Zero Conversions
+4. 🛡 Own Brand Terms Protected
+5. 🎯 Top 3 Competitor Actions
 
-If no real competitor brand is visible in the supplied data, say clearly:
-"No clear competitor brand detected in the Top 15 terms."
+If no real competitor brand is visible in the supplied candidates, say clearly:
+"No clear competitor brand detected in the selected candidate terms."
 
-Keep the answer concise and do not invent data.
+Keep the answer concise. Never invent competitor names or performance data.
 """
 
                             try:
 
                                 with st.spinner(
-                                    "AI is checking competitor-style search terms..."
+                                    "AI is extracting competitor names from selected search terms..."
                                 ):
 
                                     competitor_ai_response = (
                                         openai_client.responses.create(
                                             model="gpt-5.4-mini",
                                             input=competitor_prompt,
-                                            max_output_tokens=1600
+                                            max_output_tokens=1800
                                         )
                                     )
 
@@ -1663,11 +1814,11 @@ Keep the answer concise and do not invent data.
                                 )
 
                                 st.session_state[
-                                    "competitor_ai_cache_key"
+                                    "competitor_ai_cache_key_v2"
                                 ] = competitor_cache_key
 
                                 st.session_state[
-                                    "competitor_ai_cache_text"
+                                    "competitor_ai_cache_text_v2"
                                 ] = competitor_ai_text
 
                             except Exception as competitor_ai_error:
@@ -1691,9 +1842,9 @@ Keep the answer concise and do not invent data.
                             )
 
                             st.caption(
-                                "AI analyzed only the Top 15 highest-spend "
-                                "search terms. Full search-term data remains "
-                                "available in the dashboard."
+                                "Competitor names are extracted only when a clear "
+                                "brand/business name is visible in the selected "
+                                "search-term candidates."
                             )
 
                             st.write(competitor_ai_text)
@@ -2086,7 +2237,8 @@ Priority must be:
 
 
         # ==================================================
-        # # ONE-CLICK AI PERFORMANCE REPORT
+        # ONE-CLICK AI PERFORMANCE REPORT
+        # TOKEN-EFFICIENT + CACHED VERSION
         # ==================================================
 
         st.divider()
@@ -2104,75 +2256,211 @@ Priority must be:
         else:
             report_period = date_option
 
+        st.caption(
+            "The full dashboard data stays visible. The AI report uses only "
+            "overall KPIs, Top 5 campaigns, Top 10 highest-spend search terms "
+            "and Top 5 priority signals to reduce token usage."
+        )
 
         if st.button(
             "Generate AI Performance Report",
-            key="one_click_ai_report_generate_button_v2"
+            key="one_click_ai_report_generate_button_v3"
         ):
 
-            if "priority_df" in locals() and not priority_df.empty:
-                priority_context = priority_df.to_string(index=False)
+            # ----------------------------------------------
+            # COMPACT CAMPAIGN CONTEXT
+            # ----------------------------------------------
+
+            report_campaign_columns = [
+                col
+                for col in [
+                    "Campaign",
+                    "Impressions",
+                    "Clicks",
+                    "Cost (₹)",
+                    "Conversions",
+                    "CTR %",
+                    "Avg CPC (₹)",
+                    "CPA (₹)"
+                ]
+                if col in filtered_df.columns
+            ]
+
+            if report_campaign_columns:
+                report_campaign_df = filtered_df[
+                    report_campaign_columns
+                ].copy()
+
+                if "Cost (₹)" in report_campaign_df.columns:
+                    report_campaign_df = report_campaign_df.sort_values(
+                        "Cost (₹)",
+                        ascending=False
+                    )
+
+                report_campaign_df = report_campaign_df.head(5)
+                report_campaign_context = report_campaign_df.to_string(
+                    index=False
+                )
             else:
-                priority_context = "No priority actions currently available."
+                report_campaign_context = "Campaign detail is unavailable."
 
-            daily_report_prompt = f"""
-        You are a senior Google Ads performance analyst.
+            # ----------------------------------------------
+            # COMPACT SEARCH-TERM CONTEXT
+            # ----------------------------------------------
 
-        REPORT PERIOD:
-        {report_period}
+            if "search_df" in locals() and not search_df.empty:
 
-        OVERALL PERFORMANCE:
+                report_search_columns = [
+                    col
+                    for col in [
+                        "Search Term",
+                        "Campaign",
+                        "Clicks",
+                        "Cost (₹)",
+                        "Conversions"
+                    ]
+                    if col in search_df.columns
+                ]
 
-        Impressions: {total_impressions}
-        Clicks: {total_clicks}
-        Cost: ₹{total_cost:.2f}
-        Conversions: {total_conversions:.2f}
-        CTR: {overall_ctr:.2f}%
-        Average CPC: ₹{overall_cpc:.2f}
-        CPA: ₹{overall_cpa:.2f}
-        Conversion Rate: {overall_conversion_rate:.2f}%
+                if report_search_columns and "Cost (₹)" in search_df.columns:
+                    report_search_df = (
+                        search_df[
+                            search_df["Cost (₹)"] > 0
+                        ][report_search_columns]
+                        .sort_values(
+                            "Cost (₹)",
+                            ascending=False
+                        )
+                        .head(10)
+                        .copy()
+                    )
 
-        CAMPAIGN DATA:
+                    report_search_context = report_search_df.to_string(
+                        index=False
+                    )
+                else:
+                    report_search_context = "Search-term detail is unavailable."
+            else:
+                report_search_context = "No search-term data is available."
 
-        {filtered_df.to_string(index=False)}
+            # ----------------------------------------------
+            # COMPACT PRIORITY CONTEXT
+            # ----------------------------------------------
 
-        PRIORITY ACTIONS:
-
-        {priority_context}
-
-        Create a professional Google Ads performance report.
-
-        Include:
-
-        1. Executive Summary
-        2. What Is Working Well
-        3. Problems Detected
-        4. Waste Spend Analysis
-        5. Campaign Performance
-        6. Budget Recommendations
-        7. Conversion Improvement Opportunities
-        8. Top Priority Actions
-        9. Final Recommendation
-
-        Be practical, clear and concise.
-        """
-
-            with st.spinner(
-                "AI is generating your performance report..."
-            ):
-
-                daily_ai_response = openai_client.responses.create(
-                    model="gpt-5.4-mini",
-                    input=daily_report_prompt
+            if "priority_df" in locals() and not priority_df.empty:
+                report_priority_context = (
+                    priority_df
+                    .head(5)
+                    .to_string(index=False)
+                )
+            else:
+                report_priority_context = (
+                    "No priority actions are currently available."
                 )
 
-            st.subheader(
-                f"🤖 {report_period} AI Performance Report"
+            if "waste_df" in locals() and not waste_df.empty and "Cost (₹)" in waste_df.columns:
+                report_waste_amount = float(waste_df["Cost (₹)"].sum())
+            else:
+                report_waste_amount = 0.0
+
+            daily_report_prompt = f"""
+You are a senior Google Ads performance analyst.
+
+Use ONLY the supplied data. Never invent metrics, savings or causes that the data cannot prove.
+
+REPORT PERIOD:
+{report_period}
+
+OVERALL KPIs:
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+Average CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+Potential zero-conversion search-term spend: ₹{report_waste_amount:.2f}
+
+TOP CAMPAIGNS BY SPEND (MAX 5):
+{report_campaign_context}
+
+TOP SEARCH TERMS BY SPEND (MAX 10):
+{report_search_context}
+
+TOP PRIORITY SIGNALS (MAX 5):
+{report_priority_context}
+
+Create a concise professional report with exactly these sections:
+1. Executive Summary
+2. What Is Working
+3. Main Problems
+4. Waste / Search-Term Review
+5. Budget & Conversion Opportunities
+6. Top 5 Actions
+
+Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions in English.
+"""
+
+            report_cache_key = (
+                f"v3|{report_period}|{selected_campaign}|"
+                f"{total_impressions}|{total_clicks}|{total_cost:.2f}|"
+                f"{total_conversions:.2f}|{report_campaign_context}|"
+                f"{report_search_context}|{report_priority_context}"
             )
 
-            st.write(
-                daily_ai_response.output_text
-            )
+            if (
+                st.session_state.get("ai_report_cache_key_v3")
+                == report_cache_key
+                and st.session_state.get("ai_report_cache_text_v3")
+            ):
+                report_ai_text = st.session_state[
+                    "ai_report_cache_text_v3"
+                ]
+
+                st.success(
+                    "Showing the saved report for the same data. "
+                    "No new AI call was used."
+                )
+
+            else:
+                report_ai_text = None
+
+                try:
+                    with st.spinner(
+                        "AI is generating your compact performance report..."
+                    ):
+                        daily_ai_response = openai_client.responses.create(
+                            model="gpt-5.4-mini",
+                            input=daily_report_prompt,
+                            max_output_tokens=1600
+                        )
+
+                    report_ai_text = daily_ai_response.output_text
+
+                    st.session_state[
+                        "ai_report_cache_key_v3"
+                    ] = report_cache_key
+
+                    st.session_state[
+                        "ai_report_cache_text_v3"
+                    ] = report_ai_text
+
+                except Exception as report_ai_error:
+                    st.error(
+                        "AI Performance Report could not run right now. "
+                        "If this is a rate-limit or credit issue, wait or add "
+                        "API credit and try again once."
+                    )
+                    st.caption(
+                        f"Technical detail: {report_ai_error}"
+                    )
+
+            if report_ai_text:
+                st.subheader(
+                    f"🤖 {report_period} AI Performance Report"
+                )
+                st.write(report_ai_text)
 
 
         # ==================================================
@@ -3391,8 +3679,32 @@ Priority must be:
                 )
 
                 # ==================================================
-                # SEARCH TERMS CONTEXT
+                # ASK AI SEARCH-TERM CONTEXT
+                # QUESTION-RELATED + TOP-15 TOKEN-EFFICIENT VERSION
                 # ==================================================
+
+                negative_keyword_question = any(
+                    phrase in question_lower
+                    for phrase in [
+                        "negative keyword",
+                        "negative keywords",
+                        "నెగటివ్",
+                        "నెగెటివ్"
+                    ]
+                )
+
+                competitor_question = any(
+                    phrase in question_lower
+                    for phrase in [
+                        "competitor",
+                        "competitors",
+                        "competition",
+                        "competitor name",
+                        "competitor names",
+                        "కాంపిటిటర్",
+                        "కాంపిటిటర్స్"
+                    ]
+                )
 
                 if "search_df" in locals() and not search_df.empty:
 
@@ -3422,23 +3734,160 @@ Priority must be:
                                     "Conversions": "sum"
                                 }
                             )
-                            .sort_values(
-                                "Cost (₹)",
-                                ascending=False
+                        )
+
+                        # AI receives only terms with actual spend.
+                        search_terms_for_ai = search_terms_for_ai[
+                            search_terms_for_ai["Cost (₹)"] > 0
+                        ].copy()
+
+                        # ------------------------------------------
+                        # QUESTION-RELATED SERVICE FILTER
+                        # ------------------------------------------
+
+                        service_question_groups = [
+                            (["nursing", "nurse"], ["nursing", "nurse"]),
+                            (["patient"], ["patient"]),
+                            (["elderly", "senior", "old age"], ["elderly", "senior", "old age"]),
+                            (["baby", "babysitter", "nanny"], ["baby", "babysitter", "nanny"]),
+                            (["caretaker", "care taker", "caregiver", "attendant"], ["caretaker", "care taker", "caregiver", "attendant"]),
+                            (["maid", "domestic help", "housekeeping", "housekeeper", "cook"], ["maid", "domestic help", "housekeeping", "housekeeper", "cook"]),
+                            (["home care", "homecare"], ["home care", "homecare"])
+                        ]
+
+                        matched_service_terms = []
+
+                        for question_phrases, term_phrases in service_question_groups:
+                            if any(
+                                phrase in question_lower
+                                for phrase in question_phrases
+                            ):
+                                matched_service_terms.extend(term_phrases)
+
+                        if negative_keyword_question:
+                            selected_search_terms_for_ai = (
+                                search_terms_for_ai[
+                                    search_terms_for_ai["Conversions"] == 0
+                                ]
+                                .sort_values(
+                                    "Cost (₹)",
+                                    ascending=False
+                                )
+                                .head(15)
+                                .copy()
                             )
-                            .head(100)
+
+                        elif (
+                            competitor_question
+                            and "competitor_candidate_df" in locals()
+                            and not competitor_candidate_df.empty
+                        ):
+                            competitor_ask_columns = [
+                                "Search Term",
+                                "Campaign",
+                                "Clicks",
+                                "Cost (₹)",
+                                "Conversions"
+                            ]
+
+                            competitor_ask_columns = [
+                                col
+                                for col in competitor_ask_columns
+                                if col in competitor_candidate_df.columns
+                            ]
+
+                            selected_search_terms_for_ai = (
+                                competitor_candidate_df[competitor_ask_columns]
+                                .head(15)
+                                .copy()
+                            )
+
+                        elif matched_service_terms:
+                            service_mask = search_terms_for_ai[
+                                "Search Term"
+                            ].astype(str).str.lower().apply(
+                                lambda term: any(
+                                    phrase in term
+                                    for phrase in matched_service_terms
+                                )
+                            )
+
+                            service_filtered_df = search_terms_for_ai[
+                                service_mask
+                            ].copy()
+
+                            if not service_filtered_df.empty:
+                                selected_search_terms_for_ai = (
+                                    service_filtered_df
+                                    .sort_values(
+                                        "Cost (₹)",
+                                        ascending=False
+                                    )
+                                    .head(15)
+                                    .copy()
+                                )
+                            else:
+                                selected_search_terms_for_ai = (
+                                    search_terms_for_ai
+                                    .sort_values(
+                                        "Cost (₹)",
+                                        ascending=False
+                                    )
+                                    .head(15)
+                                    .copy()
+                                )
+
+                        else:
+                            # General questions: combine high-spend terms with
+                            # a few converting terms so AI sees both risk and quality.
+                            high_spend_terms = (
+                                search_terms_for_ai
+                                .sort_values(
+                                    "Cost (₹)",
+                                    ascending=False
+                                )
+                                .head(10)
+                            )
+
+                            converting_terms = (
+                                search_terms_for_ai[
+                                    search_terms_for_ai["Conversions"] > 0
+                                ]
+                                .sort_values(
+                                    ["Conversions", "Cost (₹)"],
+                                    ascending=[False, False]
+                                )
+                                .head(5)
+                            )
+
+                            selected_search_terms_for_ai = (
+                                pd.concat(
+                                    [high_spend_terms, converting_terms],
+                                    ignore_index=True
+                                )
+                                .drop_duplicates(
+                                    subset=["Search Term", "Campaign"]
+                                )
+                                .head(15)
+                                .copy()
+                            )
+
+                        search_terms_context = (
+                            selected_search_terms_for_ai
+                            .to_string(index=False)
                         )
 
                     else:
-                        search_terms_for_ai = (
-                            search_terms_for_ai.head(100)
+                        selected_search_terms_for_ai = (
+                            search_terms_for_ai
+                            .head(15)
+                            .copy()
                         )
 
-                    search_terms_context = (
-                        search_terms_for_ai.to_string(
-                            index=False
+                        search_terms_context = (
+                            selected_search_terms_for_ai
+                            .to_string(index=False)
                         )
-                    )
 
                     search_terms_available = True
 
@@ -3465,20 +3914,6 @@ Priority must be:
                     before_after_context = (
                         "No Before vs After comparison data is available."
                     )
-
-                # ==================================================
-                # NEGATIVE KEYWORD QUESTION
-                # ==================================================
-
-                negative_keyword_question = any(
-                    phrase in question_lower
-                    for phrase in [
-                        "negative keyword",
-                        "negative keywords",
-                        "నెగటివ్",
-                        "నెగెటివ్"
-                    ]
-                )
 
                 if (
                     negative_keyword_question
@@ -3507,6 +3942,45 @@ Priority must be:
                         )
 
                 else:
+
+                    # ==================================================
+                    # COMPACT CAMPAIGN CONTEXT FOR ASK AI
+                    # ==================================================
+
+                    ask_campaign_columns = [
+                        col
+                        for col in [
+                            "Campaign",
+                            "Impressions",
+                            "Clicks",
+                            "Cost (₹)",
+                            "Conversions",
+                            "CTR %",
+                            "Avg CPC (₹)",
+                            "CPA (₹)"
+                        ]
+                        if col in filtered_df.columns
+                    ]
+
+                    if ask_campaign_columns:
+                        ask_campaign_df = filtered_df[
+                            ask_campaign_columns
+                        ].copy()
+
+                        if "Cost (₹)" in ask_campaign_df.columns:
+                            ask_campaign_df = ask_campaign_df.sort_values(
+                                "Cost (₹)",
+                                ascending=False
+                            )
+
+                        ask_campaign_df = ask_campaign_df.head(5)
+                        ask_campaign_context = ask_campaign_df.to_string(
+                            index=False
+                        )
+                    else:
+                        ask_campaign_context = (
+                            "Campaign detail is unavailable."
+                        )
 
                     # ==================================================
                     # AI PROMPT
@@ -3594,10 +4068,10 @@ Priority must be:
         DATE FILTER:
         {date_filter_clause}
 
-        CAMPAIGN DATA:
-        {filtered_df.to_string(index=False)}
+        CAMPAIGN DATA (TOP 5 BY SPEND):
+        {ask_campaign_context}
 
-        SEARCH TERMS DATA:
+        SEARCH TERMS DATA (QUESTION-RELEVANT / IMPORTANT, MAX 15 WITH SPEND):
         {search_terms_context}
 
         BEFORE VS AFTER DATA:
@@ -3623,14 +4097,68 @@ Priority must be:
                     # OPENAI
                     # ==================================================
 
-                    with st.spinner("AI is analyzing..."):
+                    ask_ai_cache_key = (
+                        f"v3|{current_ai_period}|{selected_campaign}|"
+                        f"{question}|{ask_campaign_context}|"
+                        f"{search_terms_context}|{before_after_context}"
+                    )
 
-                        ai_response = openai_client.responses.create(
-                            model="gpt-5.4-mini",
-                            input=prompt
+                    if (
+                        st.session_state.get("ask_ai_cache_key_v3")
+                        == ask_ai_cache_key
+                        and st.session_state.get("ask_ai_cache_text_v3")
+                    ):
+                        assistant_text = st.session_state[
+                            "ask_ai_cache_text_v3"
+                        ]
+
+                        st.success(
+                            "Showing the saved answer for the same question "
+                            "and same data. No new AI call was used."
                         )
 
-                    assistant_text = ai_response.output_text
+                    else:
+                        try:
+                            with st.spinner("AI is analyzing..."):
+
+                                ai_response = openai_client.responses.create(
+                                    model="gpt-5.4-mini",
+                                    input=prompt,
+                                    max_output_tokens=1400
+                                )
+
+                            assistant_text = ai_response.output_text
+
+                            st.session_state[
+                                "ask_ai_cache_key_v3"
+                            ] = ask_ai_cache_key
+
+                            st.session_state[
+                                "ask_ai_cache_text_v3"
+                            ] = assistant_text
+
+                        except Exception as ask_ai_error:
+                            telugu_question = any(
+                                "\u0c00" <= char <= "\u0c7f"
+                                for char in question
+                            )
+
+                            if telugu_question:
+                                assistant_text = (
+                                    "AI ఇప్పుడు run కాలేదు. API credit / rate limit "
+                                    "issue ఉంటే కొంతసేపటి తర్వాత లేదా credit add "
+                                    "చేసిన తర్వాత మళ్లీ ఒక్కసారి try చేయండి."
+                                )
+                            else:
+                                assistant_text = (
+                                    "AI could not run right now. If this is an "
+                                    "API credit or rate-limit issue, wait or add "
+                                    "credit and try again once."
+                                )
+
+                            st.caption(
+                                f"Technical detail: {ask_ai_error}"
+                            )
 
                 # ==================================================
                 # SAVE RESPONSE
