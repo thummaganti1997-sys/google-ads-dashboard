@@ -1,4 +1,4 @@
-import streamlit as st
+
 import pandas as pd
 from datetime import date, timedelta
 from google.ads.googleads.client import GoogleAdsClient
@@ -652,7 +652,7 @@ try:
 
         st.dataframe(
             filtered_df,
-            use_container_width=True
+            width="stretch"
         )
 
         st.divider()
@@ -664,61 +664,20 @@ try:
 
         st.header("📈 Campaign Comparison")
 
-        chart_col1, chart_col2 = st.columns(2)
+        st.subheader("Conversions by Campaign")
 
-        with chart_col1:
+        conversion_chart = filtered_df[
+            ["Campaign", "Conversions"]
+        ].set_index("Campaign")
 
-            st.subheader("Clicks by Campaign")
+        st.bar_chart(
+            conversion_chart,
+            width="stretch"
+        )
 
-            click_chart = filtered_df[
-                ["Campaign", "Clicks"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                click_chart,
-                use_container_width=True
-            )
-
-            st.subheader("Conversions by Campaign")
-
-            conversion_chart = filtered_df[
-                ["Campaign", "Conversions"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                conversion_chart,
-                use_container_width=True
-            )
-
-
-        with chart_col2:
-
-            st.subheader("Cost by Campaign")
-
-            cost_chart = filtered_df[
-                ["Campaign", "Cost (₹)"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                cost_chart,
-                use_container_width=True
-            )
-
-            st.subheader("Clicks vs Conversions")
-
-            comparison_chart = filtered_df[
-                [
-                    "Campaign",
-                    "Clicks",
-                    "Conversions"
-                ]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                comparison_chart,
-                use_container_width=True
-            )
-
+        # ==================================================
+        # SEARCH TERMS ANALYSIS
+        # ==================================================
 
         search_query = f"""
             SELECT
@@ -729,2686 +688,2778 @@ try:
                 metrics.cost_micros,
                 metrics.conversions
             FROM search_term_view
-           WHERE {date_filter_clause}
+            WHERE {date_filter_clause}
             ORDER BY metrics.cost_micros DESC
             LIMIT 100
         """
 
-               search_response = ga_service.search(
+        search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
         )
-# ==================================================
-# POTENTIAL WASTE SPEND
-# ==================================================
 
-st.divider()
+        search_data = []
 
-st.header("💸 Potential Waste Spend")
+        for row in search_response:
+            search_impressions = int(row.metrics.impressions or 0)
+            search_clicks = int(row.metrics.clicks or 0)
+            search_cost = float(row.metrics.cost_micros or 0) / 1_000_000
+            search_conversions = float(row.metrics.conversions or 0)
 
-if not search_df.empty:
-
-    waste_df = search_df[
-        (search_df["Cost (₹)"] > 0)
-        &
-        (search_df["Conversions"] == 0)
-    ].copy()
-
-    if not waste_df.empty:
-
-        waste_df = waste_df.sort_values(
-            "Cost (₹)",
-            ascending=False
-        )
-
-        st.warning(
-            "These search terms have spend but 0 conversions."
-        )
-
-        st.dataframe(
-            waste_df,
-            use_container_width=True
-        )
-
-    else:
-
-        st.success(
-            "No major waste spend found."
-        )
-
-else:
-
-    st.info(
-        "No search term data available."
-    )
-
-# ==================================================
-# PERFORMANCE INSIGHTS
-# ==================================================
-
-st.divider()
-
-st.header("🏆 Performance Insights")
-
-if not filtered_df.empty:
-
-    insights_df = filtered_df.copy()
-
-    # Calculate CTR
-    insights_df["CTR (%)"] = (
-        insights_df["Clicks"]
-        / insights_df["Impressions"].replace(0, 1)
-        * 100
-    )
-
-    # Calculate CPA
-    insights_df["CPA (₹)"] = insights_df.apply(
-        lambda row:
-        row["Cost (₹)"] / row["Conversions"]
-        if row["Conversions"] > 0 else 0,
-        axis=1
-    )
-
-    best_campaign = insights_df.loc[
-        insights_df["Conversions"].idxmax()
-    ]
-
-    highest_spend = insights_df.loc[
-        insights_df["Cost (₹)"].idxmax()
-    ]
-
-    highest_ctr = insights_df.loc[
-        insights_df["CTR (%)"].idxmax()
-    ]
-
-    campaigns_with_conversions = insights_df[
-        insights_df["Conversions"] > 0
-    ]
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric(
-            "🎯 Best Conversions",
-            best_campaign["Campaign"],
-            f'{best_campaign["Conversions"]:.0f} conversions'
-        )
-
-    with col2:
-        st.metric(
-            "💰 Highest Spend",
-            highest_spend["Campaign"],
-            f'₹{highest_spend["Cost (₹)"]:,.2f}'
-        )
-
-    with col3:
-        st.metric(
-            "📈 Highest CTR",
-            highest_ctr["Campaign"],
-            f'{highest_ctr["CTR (%)"]:.2f}%'
-        )
-
-    if not campaigns_with_conversions.empty:
-
-        best_cpa = campaigns_with_conversions.loc[
-            campaigns_with_conversions["CPA (₹)"].idxmin()
-        ]
-
-        st.success(
-            f'🏆 Best CPA Campaign: '
-            f'{best_cpa["Campaign"]} | '
-            f'CPA: ₹{best_cpa["CPA (₹)"]:,.2f}'
-        )
-
-    else:
-
-        st.info(
-            "No campaigns with conversions available for CPA analysis."
-        )
-
-else:
-
-    st.info(
-        "No campaign data available."
-    )
-# ==================================================
-# SMART ALERTS
-# ==================================================
-
-st.divider()
-st.header("🚨 Smart Alerts")
-
-alerts = []
-
-# High CPA Alert
-if overall_cpa > 2000:
-    alerts.append(
-        f"🔴 High CPA Alert: Your CPA is ₹{overall_cpa:,.2f}. "
-        "Consider reducing spend on expensive keywords."
-    )
-
-# Low CTR Alert
-if overall_ctr < 3:
-    alerts.append(
-        f"⚠️ Low CTR Alert: Your CTR is {overall_ctr:.2f}%. "
-        "Improve ad copy and keyword relevance."
-    )
-
-# Low Conversion Rate Alert
-if overall_conversion_rate < 2:
-    alerts.append(
-        f"⚠️ Low Conversion Rate: {overall_conversion_rate:.2f}%. "
-        "Review landing page and search terms."
-    )
-
-# High CPC Alert
-if overall_cpc > 60:
-    alerts.append(
-        f"💰 High CPC Alert: Average CPC is ₹{overall_cpc:.2f}. "
-        "Focus on high-intent keywords."
-    )
-
-# Waste Spend Alert
-if 'waste_df' in locals() and not waste_df.empty:
-
-    total_waste = waste_df["Cost (₹)"].sum()
-
-    if total_waste > 500:
-
-        alerts.append(
-            f"🔴 Potential Waste Spend: ₹{total_waste:,.2f} spent "
-            "on search terms with 0 conversions."
-        )
-
-
-# DISPLAY ALERTS
-
-if alerts:
-
-    for alert in alerts:
-
-        st.warning(alert)
-
-else:
-
-    st.success(
-        "🟢 Great! No major performance alerts detected."
-    )
-# ==================================================
-# CAMPAIGN RECOMMENDATIONS
-# ==================================================
-
-st.divider()
-st.header("🎯 Campaign Recommendations")
-
-if not filtered_df.empty:
-
-    recommendations = []
-
-    for _, row in filtered_df.iterrows():
-
-        campaign = row["Campaign"]
-        cost = float(row["Cost (₹)"])
-        conversions = float(row["Conversions"])
-        clicks = float(row["Clicks"])
-        impressions = float(row["Impressions"])
-
-        ctr = (
-            clicks / impressions * 100
-            if impressions > 0
-            else 0
-        )
-
-        cpa = (
-            cost / conversions
-            if conversions > 0
-            else 0
-        )
-
-        if conversions == 0 and cost > 500:
-
-            status = "🔴 Review / Pause"
-            recommendation = (
-                "High spend with 0 conversions. "
-                "Review keywords and search terms."
+            search_ctr = (
+                search_clicks / search_impressions * 100
+                if search_impressions > 0
+                else 0
             )
 
-        elif conversions > 0 and cpa > overall_cpa:
-
-            status = "⚠️ Optimize"
-            recommendation = (
-                f"CPA is ₹{cpa:,.2f}. "
-                "Reduce waste and improve keyword targeting."
+            search_cpc = (
+                search_cost / search_clicks
+                if search_clicks > 0
+                else 0
             )
 
-        elif conversions > 0 and cpa <= overall_cpa:
-
-            status = "🟢 Scale"
-            recommendation = (
-                f"Good CPA of ₹{cpa:,.2f}. "
-                "Consider increasing budget."
+            search_cpa = (
+                search_cost / search_conversions
+                if search_conversions > 0
+                else 0
             )
 
-        elif ctr > overall_ctr and conversions == 0:
-
-            status = "🟡 Check Landing Page"
-            recommendation = (
-                "Good CTR but no conversions. "
-                "Review landing page and conversion tracking."
-            )
-
-        else:
-
-            status = "🟡 Monitor"
-            recommendation = (
-                "Continue monitoring campaign performance."
-            )
-
-        recommendations.append({
-            "Campaign": campaign,
-            "Status": status,
-            "Recommendation": recommendation
-        })
-
-    if recommendations:
-
-        recommendation_df = pd.DataFrame(recommendations)
-
-        st.dataframe(
-            recommendation_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    else:
-
-        st.info(
-            "No campaign recommendations available."
-        )
-
-else:
-
-    st.info(
-        "No campaign data available for recommendations."
-    )
-    
-   # ==================================================
-# BUDGET OPTIMIZATION
-# ==================================================
-
-st.divider()
-st.header("💰 Budget Optimization Suggestions")
-
-if not filtered_df.empty:
-
-    budget_suggestions = []
-
-    for _, row in filtered_df.iterrows():
-
-        campaign = row["Campaign"]
-        cost = float(row["Cost (₹)"])
-        conversions = float(row["Conversions"])
-
-        cpa = (
-            cost / conversions
-            if conversions > 0 else 0
-        )
-
-        if conversions == 0 and cost > 500:
-
-            action = "🔴 Reduce / Stop"
-            suggestion = (
-                "Spend is high but there are no conversions. "
-                "Reduce budget and review search terms."
-            )
-
-        elif conversions > 0 and cpa < overall_cpa * 0.8:
-
-            action = "🟢 Increase Budget"
-            suggestion = (
-                f"Strong performance with CPA ₹{cpa:,.2f}. "
-                "Consider increasing budget by 10–20%."
-            )
-
-        elif conversions > 0 and cpa > overall_cpa * 1.2:
-
-            action = "🟠 Reduce Budget"
-            suggestion = (
-                f"CPA ₹{cpa:,.2f} is above average. "
-                "Optimize keywords before increasing spend."
-            )
-
-        else:
-
-            action = "🟡 Maintain"
-            suggestion = (
-                "Performance is close to account average. "
-                "Keep budget stable and continue monitoring."
-            )
-
-        budget_suggestions.append({
-            "Campaign": campaign,
-            "Cost (₹)": round(cost, 2),
-            "Conversions": round(conversions, 2),
-            "CPA (₹)": round(cpa, 2) if conversions > 0 else "N/A",
-            "Action": action,
-            "Suggestion": suggestion
-        })
-
-
-    budget_df = pd.DataFrame(budget_suggestions)
-
-    st.dataframe(
-        budget_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "No campaign data available for budget optimization."
-    )
-       
-    # ------------------------------------------
-    # PAUSE / REDUCE KEYWORDS
-    # ------------------------------------------
-
-    st.subheader(
-        "🔴 Keywords Needing Attention"
-    )
-
-    attention_df = keyword_recommendation_df[
-        keyword_recommendation_df["Action"].isin(
-            [
-                "🔴 Pause / Reduce",
-                "🟠 Review"
-            ]
-        )
-    ].copy()
-
-    if not attention_df.empty:
-
-        st.dataframe(
-            attention_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    else:
-
-        st.success(
-            "No keywords currently need major attention."
-        )
-
-
-    # ------------------------------------------
-    # BEST KEYWORDS
-    # ------------------------------------------
-
-    st.subheader(
-        "🟢 Recommended Keywords to Keep"
-    )
-
-    best_keyword_df = keyword_recommendation_df[
-        keyword_recommendation_df["Action"]
-        == "🟢 Keep / Increase"
-    ].copy()
-
-    if not best_keyword_df.empty:
-
-        st.dataframe(
-            best_keyword_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    else:
-
-        st.info(
-            "No strong winning keywords found yet."
-        )
-
-
-
-
-        # ------------------------------------------
-        # WASTE KEYWORDS
-        # ------------------------------------------
-
-        st.subheader(
-            "🚨 High Spend + Zero Conversion Keywords"
-        )
-
-      
-
-    keyword_df["Status"] == "🔴 Waste"
-
-
-
-    waste_keywords_df = waste_keywords_df.sort_values(
-        "Cost (₹)",
-        ascending=False
-    )
-
-    st.dataframe(
-        waste_keywords_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ==================================================
-# ADVANCED AI NEGATIVE KEYWORD INTELLIGENCE V2
-# ==================================================
-
-st.divider()
-st.header("🚫 Advanced AI Negative Keyword Intelligence")
-
-
-# --------------------------------------------------
-# CHECK SEARCH TERM DATA
-# --------------------------------------------------
-
-if "search_df" in locals() and not search_df.empty:
-
-    required_columns = [
-        "Search Term",
-        "Clicks",
-        "Cost (₹)",
-        "Conversions"
-    ]
-
-    missing_columns = [
-        col
-        for col in required_columns
-        if col not in search_df.columns
-    ]
-
-    if missing_columns:
-
-        st.warning(
-            "Required search-term columns are missing: "
-            + ", ".join(missing_columns)
-        )
-
-    else:
-
-        negative_candidates = search_df[
-            (search_df["Conversions"] == 0)
-            &
-            (search_df["Cost (₹)"] > 0)
-        ].copy()
-
-        negative_candidates = negative_candidates.sort_values(
-            "Cost (₹)",
-            ascending=False
-        )
-
-
-        # ==========================================
-        # SUMMARY METRICS
-        # ==========================================
-
-        if not negative_candidates.empty:
-
-            candidate_count = len(
-                negative_candidates
-            )
-
-            candidate_spend = float(
-                negative_candidates[
-                    "Cost (₹)"
-                ].sum()
-            )
-
-            candidate_clicks = float(
-                negative_candidates[
-                    "Clicks"
-                ].sum()
-            )
-
-            top_candidate_spend = float(
-                negative_candidates[
-                    "Cost (₹)"
-                ].max()
-            )
-
-
-            neg_col1, neg_col2, neg_col3, neg_col4 = (
-                st.columns(4)
-            )
-
-            with neg_col1:
-
-                st.metric(
-                    "Terms to Review",
-                    f"{candidate_count:,}"
-                )
-
-            with neg_col2:
-
-                st.metric(
-                    "Spend Under Review",
-                    f"₹{candidate_spend:,.2f}"
-                )
-
-            with neg_col3:
-
-                st.metric(
-                    "Clicks Under Review",
-                    f"{candidate_clicks:,.0f}"
-                )
-
-            with neg_col4:
-
-                st.metric(
-                    "Highest Single-Term Spend",
-                    f"₹{top_candidate_spend:,.2f}"
-                )
-
-
-            # ======================================
-            # RAW REVIEW TABLE
-            # ======================================
-
-            st.subheader(
-                "🔍 Zero-Conversion Search Terms to Review"
-            )
-
-
-            display_columns = [
-                "Search Term"
-            ]
-
-            if "Campaign" in negative_candidates.columns:
-                display_columns.append(
-                    "Campaign"
-                )
-
-            display_columns.extend(
-                [
-                    "Clicks",
-                    "Cost (₹)",
-                    "Conversions"
-                ]
-            )
-
-
-            st.dataframe(
-                negative_candidates[
-                    display_columns
-                ],
-                use_container_width=True,
-                hide_index=True
-            )
-
-
-            st.info(
-                "Zero conversions alone does NOT mean a search term "
-                "should become a negative keyword. "
-                "The AI below protects your brand and core services."
-            )
-
-
-            # ======================================
-            # AI ANALYSIS BUTTON
-            # ======================================
-
-            if st.button(
-                "🧠 Run Advanced Negative Keyword Intelligence",
-                key="advanced_negative_keyword_v2_button"
-            ):
-
-                negative_context = (
-                    negative_candidates
-                    .head(50)
-                    .to_string(
-                        index=False
-                    )
-                )
-
-
-                negative_prompt = f"""
-You are a senior Google Ads Search Term Intelligence specialist.
-
-Your job is NOT to create as many negative keywords as possible.
-
-Your job is to protect qualified leads while identifying only genuinely wasteful or irrelevant traffic.
-
-BUSINESS:
-Harekrishna Home Care Services.
-
-PRIMARY LOCATION:
-Hyderabad.
-
-CORE BUSINESS SERVICES:
-- Home care
-- Elderly care
-- Senior care
-- Patient care
-- Nursing care
-- Nurse at home
-- Home nurse
-- Caretaker
-- Care taker
-- Baby care
-- Babysitter
-- Nanny
-- Maid
-- Domestic help
-- Housekeeping
-- Housekeeper
-- Cook services
-
-PROTECTED OWN-BRAND TERMS:
-- hare krishna
-- harekrishna
-- hare krishna home care
-- harekrishna home care
-- hare krishna home care services
-- harekrishna home care services
-
-PROTECTED CORE SERVICE TERMS:
-- home care
-- homecare
-- elderly care
-- senior care
-- patient care
-- nursing
-- nurse
-- home nurse
-- caretaker
-- care taker
-- baby care
-- babysitter
-- nanny
-- maid
-- domestic help
-- housekeeping
-- housekeeper
-- cook
-
-
-==================================================
-MANDATORY PROTECTION RULES
-==================================================
-
-1. NEVER recommend the user's own Harekrishna / Hare Krishna brand
-   as a negative keyword.
-
-2. Own-brand searches must normally be classified as:
-   KEEP
-   Intent = BRAND / LEAD
-   Risk = PROTECTED
-
-3. NEVER recommend a core service term as a negative keyword
-   merely because it has zero conversions.
-
-4. Zero conversions alone is NOT enough evidence to block a term.
-
-5. Maid and domestic-help searches are valid services for this business.
-   NEVER recommend "maid" or "domestic help" as global negatives.
-
-6. Nursing, nurse, caretaker, elderly care, patient care,
-   baby care and home care are protected service themes.
-
-7. If a protected service appears with irrelevant intent,
-   block ONLY the irrelevant modifier.
-
-Examples:
-
-"maid jobs hyderabad"
-Suggested Negative = jobs
-NOT maid
-
-"nurse salary"
-Suggested Negative = salary
-NOT nurse
-
-"caretaker vacancy"
-Suggested Negative = vacancy
-NOT caretaker
-
-"home care course"
-Suggested Negative = course
-NOT home care
-
-"nursing training institute"
-Suggested Negative = training
-or institute
-NOT nursing
-
-8. If a search term is a valid service but may belong in another campaign,
-   classify it as REVIEW and suggest CAMPAIGN ROUTING.
-   Do NOT make the valid service itself negative.
-
-9. Competitor-brand searches should normally be REVIEW,
-   not automatically ADD AS NEGATIVE.
-
-10. Wrong-location terms should be carefully reviewed.
-    Do not block a whole city/state unless the location intent is clearly
-    outside the business target and there is no valid reason to keep it.
-
-11. Never invent conversion, lead-quality, campaign or revenue data.
-
-
-==================================================
-INTENT CLASSIFICATION
-==================================================
-
-Classify each search term into ONE primary intent:
-
-LEAD
-BRAND
-JOB
-TRAINING
-INFORMATIONAL
-COMPETITOR
-WRONG LOCATION
-UNRELATED SERVICE
-AMBIGUOUS
-
-
-==================================================
-ACTION CLASSIFICATION
-==================================================
-
-Choose ONE:
-
-KEEP
-REVIEW
-ADD AS NEGATIVE
-
-
-==================================================
-RISK CLASSIFICATION
-==================================================
-
-Choose ONE:
-
-PROTECTED
-LOW RISK TO BLOCK
-MEDIUM RISK
-HIGH RISK TO BLOCK
-
-
-==================================================
-CONFIDENCE SCORE
-==================================================
-
-Give a Confidence Score from 0% to 100%.
-
-Use high confidence only when intent is very clear.
-
-Examples:
-
-jobs / vacancies / salary / recruitment:
-usually high-confidence negative modifiers.
-
-course / training / institute / certification:
-usually high-confidence negative modifiers.
-
-own brand:
-100% protected.
-
-valid home-care service:
-high confidence KEEP.
-
-ambiguous or competitor term:
-usually REVIEW rather than automatic negative.
-
-
-==================================================
-MATCH TYPE RULES
-==================================================
-
-For negative recommendations choose:
-
-Phrase
-or
-Exact
-
-Prefer conservative match types.
-
-Do NOT recommend broad blocking that could remove qualified traffic.
-
-
-==================================================
-COMMON SAFE NEGATIVE INTENT
-==================================================
-
-These may be negative modifiers when clearly irrelevant:
-
-jobs
-job
-vacancy
-vacancies
-salary
-career
-careers
-recruitment
-resume
-course
-courses
-training
-institute
-certification
-exam
-
-But first verify that the modifier is genuinely irrelevant.
-
-
-==================================================
-CAMPAIGN ROUTING
-==================================================
-
-If the term is relevant but belongs to another service category,
-do NOT block it.
-
-Instead recommend routing such as:
-
-Nursing Campaign
-Patient Care Campaign
-Elderly Care Campaign
-Baby Care Campaign
-Domestic Help Campaign
-Caretaker Campaign
-
-
-==================================================
-SEARCH TERM DATA
-==================================================
-
-The following terms have spend and zero conversions:
-
-{negative_context}
-
-
-==================================================
-OUTPUT TABLE
-==================================================
-
-Return a clear Markdown table with these columns:
-
-Search Term
-Campaign
-Spend
-Clicks
-Intent
-Recommended Action
-Suggested Negative Keyword
-Suggested Match Type
-Confidence Score
-Risk Level
-Campaign Routing
-Reason
-Priority
-
-
-==================================================
-PRIORITY RULES
-==================================================
-
-HIGH:
-Clearly irrelevant intent + meaningful spend/clicks.
-
-MEDIUM:
-Ambiguous, competitor, wrong-location or routing issue.
-
-LOW:
-Low evidence, small data sample or potentially relevant intent.
-
-
-==================================================
-AFTER THE TABLE
-==================================================
-
-Provide these sections:
-
-1. 🔴 Safe Negatives to Apply Now
-   - Only high-confidence, low-risk negatives.
-
-2. 🛡 Protected Terms — Never Block
-   - Own brand and valid service terms found in the data.
-
-3. 🟡 Review Before Blocking
-   - Ambiguous / competitor / location terms.
-
-4. 🔀 Campaign Routing Opportunities
-   - Relevant terms that belong in another campaign.
-
-5. 💸 Highest Waste-Priority Terms
-   - Rank by actual spend from the supplied data.
-   - Do not invent savings.
-
-6. 🎯 Top 5 Actions
-   - Practical next steps.
-
-IMPORTANT:
-Be conservative.
-Protect qualified customer traffic.
-Do not force a negative recommendation when no safe negative exists.
-Never invent data.
-"""
-
-
-                with st.spinner(
-                    "AI is classifying search-term intent and risk..."
-                ):
-
-                    negative_ai_response = (
-                        openai_client.responses.create(
-                            model="gpt-5.4-mini",
-                            input=negative_prompt
-                        )
-                    )
-
-
-                st.subheader(
-                    "🤖 Advanced Negative Keyword Intelligence"
-                )
-
-                st.write(
-                    negative_ai_response.output_text
-                )
-
-
-        else:
-
-            st.success(
-                "No search terms with spend and zero conversions "
-                "were found for the selected data."
-            )
-
-
-else:
-
-    st.info(
-        "Search term data is not available."
-    )
-
-   # ==================================================
-# AI PRIORITY ACTION CENTER
-# ==================================================
-
-st.divider()
-st.header("🎯 AI Priority Action Center")
-
-priority_actions = []
-
-# HIGH CPA
-if overall_cpa > 2000 and total_conversions > 0:
-
-    priority_actions.append({
-        "Priority": "🔴 HIGH",
-        "Area": "CPA",
-        "Problem": f"CPA is high at ₹{overall_cpa:,.2f}",
-        "Action": "Reduce waste spend and focus budget on converting campaigns."
-    })
-
-
-# ZERO / LOW CONVERSIONS
-if total_conversions == 0:
-
-    priority_actions.append({
-        "Priority": "🔴 HIGH",
-        "Area": "Conversions",
-        "Problem": "No conversions recorded.",
-        "Action": "Check conversion tracking, search terms, keywords and landing page."
-    })
-
-elif overall_conversion_rate < 2:
-
-    priority_actions.append({
-        "Priority": "🟠 MEDIUM",
-        "Area": "Conversion Rate",
-        "Problem": f"Conversion rate is only {overall_conversion_rate:.2f}%",
-        "Action": "Improve landing page relevance and focus on high-intent keywords."
-    })
-
-
-# HIGH CPC
-if overall_cpc > 60:
-
-    priority_actions.append({
-        "Priority": "🟠 MEDIUM",
-        "Area": "CPC",
-        "Problem": f"Average CPC is ₹{overall_cpc:.2f}",
-        "Action": "Review expensive keywords, match types and search terms."
-    })
-
-
-# WASTE SPEND
-if "waste_df" in locals() and not waste_df.empty:
-
-    waste_amount = waste_df["Cost (₹)"].sum()
-
-    if waste_amount > 500:
-
-        priority_actions.append({
-            "Priority": "🔴 HIGH",
-            "Area": "Waste Spend",
-            "Problem": f"₹{waste_amount:,.2f} spent with zero conversions.",
-            "Action": "Review these search terms and add irrelevant terms as negatives."
-        })
-
-
-# GOOD CTR
-if overall_ctr >= 8:
-
-    priority_actions.append({
-        "Priority": "🟢 GOOD",
-        "Area": "CTR",
-        "Problem": f"CTR is strong at {overall_ctr:.2f}%",
-        "Action": "Keep strong ads running and focus on conversion quality."
-    })
-
-
-if priority_actions:
-
-    priority_df = pd.DataFrame(
-        priority_actions
-    )
-
-    priority_order = {
-        "🔴 HIGH": 1,
-        "🟠 MEDIUM": 2,
-        "🟢 GOOD": 3
-    }
-
-    priority_df["Order"] = (
-        priority_df["Priority"]
-        .map(priority_order)
-    )
-
-    priority_df = (
-        priority_df
-        .sort_values("Order")
-        .drop(columns=["Order"])
-    )
-
-    st.dataframe(
-        priority_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.success(
-        "🟢 No major actions required right now."
-    )
- 
-# ==================================================
-# # ONE-CLICK AI PERFORMANCE REPORT
-# ==================================================
-
-st.divider()
-st.header("📋 One-Click AI Performance Report")
-
-if date_option == "Today":
-    report_period = "Today's"
-
-elif date_option == "Custom Date Range":
-    report_period = (
-        f"{start_date.strftime('%d %b %Y')} → "
-        f"{end_date.strftime('%d %b %Y')}"
-    )
-
-else:
-    report_period = date_option
-
-
-if st.button(
-    "Generate AI Performance Report",
-    key="one_click_ai_report_generate_button_v2"
-):
-
-    if "priority_df" in locals() and not priority_df.empty:
-        priority_context = priority_df.to_string(index=False)
-    else:
-        priority_context = "No priority actions currently available."
-
-    daily_report_prompt = f"""
-You are a senior Google Ads performance analyst.
-
-REPORT PERIOD:
-{report_period}
-
-OVERALL PERFORMANCE:
-
-Impressions: {total_impressions}
-Clicks: {total_clicks}
-Cost: ₹{total_cost:.2f}
-Conversions: {total_conversions:.2f}
-CTR: {overall_ctr:.2f}%
-Average CPC: ₹{overall_cpc:.2f}
-CPA: ₹{overall_cpa:.2f}
-Conversion Rate: {overall_conversion_rate:.2f}%
-
-CAMPAIGN DATA:
-
-{filtered_df.to_string(index=False)}
-
-PRIORITY ACTIONS:
-
-{priority_context}
-
-Create a professional Google Ads performance report.
-
-Include:
-
-1. Executive Summary
-2. What Is Working Well
-3. Problems Detected
-4. Waste Spend Analysis
-5. Campaign Performance
-6. Budget Recommendations
-7. Conversion Improvement Opportunities
-8. Top Priority Actions
-9. Final Recommendation
-
-Be practical, clear and concise.
-"""
-
-    with st.spinner(
-        "AI is generating your performance report..."
-    ):
-
-        daily_ai_response = openai_client.responses.create(
-            model="gpt-5.4-mini",
-            input=daily_report_prompt
-        )
-
-    st.subheader(
-        f"🤖 {report_period} AI Performance Report"
-    )
-
-    st.write(
-        daily_ai_response.output_text
-    )
-
-
-# ==================================================
-# FINAL AI RECOMMENDATIONS SUMMARY
-# ==================================================
-
-st.divider()
-st.header("📌 Final AI Recommendations Summary")
-
-summary_actions = []
-
-if total_conversions == 0:
-    summary_actions.append(
-        "🔴 Check conversion tracking and landing page immediately."
-    )
-
-if overall_cpc > 60:
-    summary_actions.append(
-        f"🟠 Avg CPC is high at ₹{overall_cpc:.2f}. Review expensive keywords."
-    )
-
-if overall_cpa > 2000 and total_conversions > 0:
-    summary_actions.append(
-        f"🔴 CPA is high at ₹{overall_cpa:.2f}. Reduce waste and optimize targeting."
-    )
-
-if "waste_df" in locals() and not waste_df.empty:
-    waste_amount = waste_df["Cost (₹)"].sum()
-
-    summary_actions.append(
-        f"🔴 Review ₹{waste_amount:,.2f} potential waste spend."
-    )
-
-if overall_ctr >= 8:
-    summary_actions.append(
-        f"🟢 CTR is strong at {overall_ctr:.2f}%. Keep high-performing ads running."
-    )
-
-if summary_actions:
-    for i, action in enumerate(
-        summary_actions[:5],
-        start=1
-    ):
-        st.write(
-            f"**{i}. {action}**"
-        )
-else:
-    st.success(
-        "🟢 Account performance looks stable. Continue monitoring."
-    )
-
-# ==================================================
-# ACCOUNT HEALTH SCORE
-# ==================================================
-
-st.divider()
-st.header("🧠 Account Health Score")
-
-# Use the currently selected campaign/date-range data
-health_impressions = float(filtered_df["Impressions"].sum()) if "Impressions" in filtered_df.columns else 0
-health_clicks = float(filtered_df["Clicks"].sum()) if "Clicks" in filtered_df.columns else 0
-health_cost = float(filtered_df["Cost (₹)"].sum()) if "Cost (₹)" in filtered_df.columns else 0
-health_conversions = float(filtered_df["Conversions"].sum()) if "Conversions" in filtered_df.columns else 0
-
-health_ctr = (
-    (health_clicks / health_impressions) * 100
-    if health_impressions > 0 else 0
-)
-
-health_cpc = (
-    health_cost / health_clicks
-    if health_clicks > 0 else 0
-)
-
-health_cpa = (
-    health_cost / health_conversions
-    if health_conversions > 0 else 0
-)
-
-health_conversion_rate = (
-    (health_conversions / health_clicks) * 100
-    if health_clicks > 0 else 0
-)
-
-health_score = 100
-health_notes = []
-
-# CTR
-if health_ctr < 3:
-    health_score -= 20
-    health_notes.append(f"🔴 CTR is low at {health_ctr:.2f}%.")
-elif health_ctr < 6:
-    health_score -= 10
-    health_notes.append(f"🟠 CTR needs improvement at {health_ctr:.2f}%.")
-else:
-    health_notes.append(f"🟢 CTR is healthy at {health_ctr:.2f}%.")
-
-# CPC
-if health_cpc > 60:
-    health_score -= 15
-    health_notes.append(f"🔴 CPC is high at ₹{health_cpc:.2f}.")
-elif health_cpc > 40:
-    health_score -= 8
-    health_notes.append(f"🟠 CPC is moderately high at ₹{health_cpc:.2f}.")
-else:
-    health_notes.append(f"🟢 CPC is under control at ₹{health_cpc:.2f}.")
-
-# Conversion Rate
-if health_conversion_rate < 2:
-    health_score -= 20
-    health_notes.append(
-        f"🔴 Conversion Rate is low at {health_conversion_rate:.2f}%."
-    )
-elif health_conversion_rate < 5:
-    health_score -= 10
-    health_notes.append(
-        f"🟠 Conversion Rate needs improvement at {health_conversion_rate:.2f}%."
-    )
-else:
-    health_notes.append(
-        f"🟢 Conversion Rate is healthy at {health_conversion_rate:.2f}%."
-    )
-
-# CPA
-if health_conversions > 0:
-    if health_cpa > 2000:
-        health_score -= 20
-        health_notes.append(f"🔴 CPA is high at ₹{health_cpa:.2f}.")
-    elif health_cpa > 1000:
-        health_score -= 10
-        health_notes.append(f"🟠 CPA needs monitoring at ₹{health_cpa:.2f}.")
-    else:
-        health_notes.append(f"🟢 CPA is healthy at ₹{health_cpa:.2f}.")
-else:
-    health_score -= 20
-    health_notes.append("🔴 No conversions recorded for the selected data.")
-
-# Waste spend
-if "waste_df" in locals() and not waste_df.empty:
-    waste_amount = float(waste_df["Cost (₹)"].sum())
-
-    waste_ratio = (
-        (waste_amount / health_cost) * 100
-        if health_cost > 0 else 0
-    )
-
-    if waste_ratio > 25:
-        health_score -= 20
-        health_notes.append(
-            f"🔴 Waste spend is high at {waste_ratio:.1f}% of selected spend."
-        )
-    elif waste_ratio > 10:
-        health_score -= 10
-        health_notes.append(
-            f"🟠 Waste spend is {waste_ratio:.1f}% of selected spend."
-        )
-    else:
-        health_notes.append(
-            f"🟢 Waste spend is under control at {waste_ratio:.1f}%."
-        )
-
-health_score = max(0, min(100, health_score))
-
-if health_score >= 80:
-    health_status = "🟢 Excellent"
-elif health_score >= 60:
-    health_status = "🟡 Good"
-elif health_score >= 40:
-    health_status = "🟠 Needs Attention"
-else:
-    health_status = "🔴 Critical"
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric(
-        "Account Health Score",
-        f"{health_score}/100"
-    )
-
-with col2:
-    st.metric(
-        "Health Status",
-        health_status
-    )
-
-st.progress(health_score / 100)
-
-for note in health_notes:
-    st.write(note)
-# ==================================================
-# WASTE RISK + BUDGET REALLOCATION INTELLIGENCE
-# ==================================================
-
-st.divider()
-st.header("🚨 Waste Risk & Budget Intelligence")
-
-selected_spend = (
-    float(filtered_df["Cost (₹)"].sum())
-    if "Cost (₹)" in filtered_df.columns
-    else 0
-)
-
-selected_conversions = (
-    float(filtered_df["Conversions"].sum())
-    if "Conversions" in filtered_df.columns
-    else 0
-)
-
-selected_cpa = (
-    selected_spend / selected_conversions
-    if selected_conversions > 0
-    else 0
-)
-
-waste_amount = 0.0
-
-if "waste_df" in locals() and not waste_df.empty:
-    if "Cost (₹)" in waste_df.columns:
-        waste_amount = float(waste_df["Cost (₹)"].sum())
-
-waste_ratio = (
-    (waste_amount / selected_spend) * 100
-    if selected_spend > 0
-    else 0
-)
-
-# -----------------------------
-# WASTE RISK SCORE
-# -----------------------------
-
-if waste_ratio >= 30:
-    waste_risk_score = 90
-    waste_risk_status = "🔴 Critical"
-elif waste_ratio >= 20:
-    waste_risk_score = 75
-    waste_risk_status = "🟠 High"
-elif waste_ratio >= 10:
-    waste_risk_score = 50
-    waste_risk_status = "🟡 Moderate"
-elif waste_ratio > 0:
-    waste_risk_score = 25
-    waste_risk_status = "🟢 Low"
-else:
-    waste_risk_score = 0
-    waste_risk_status = "🟢 Very Low"
-
-risk_col1, risk_col2, risk_col3 = st.columns(3)
-
-with risk_col1:
-    st.metric(
-        "Waste Risk Score",
-        f"{waste_risk_score}/100"
-    )
-
-with risk_col2:
-    st.metric(
-        "Waste Risk",
-        waste_risk_status
-    )
-
-with risk_col3:
-    st.metric(
-        "Potential Waste Spend",
-        f"₹{waste_amount:,.2f}"
-    )
-
-st.progress(waste_risk_score / 100)
-
-st.write(
-    f"Potential waste represents **{waste_ratio:.1f}%** "
-    f"of selected spend."
-)
-
-# -----------------------------
-# BUDGET INTELLIGENCE
-# -----------------------------
-
-st.subheader("💰 Budget Reallocation Suggestions")
-
-budget_actions = []
-
-# Critical / high waste = do NOT increase budget
-if waste_ratio >= 20:
-    budget_actions.append(
-        "🔴 **Do not increase total budget yet.** "
-        "Waste spend is too high. Reduce irrelevant traffic first."
-    )
-
-    budget_actions.append(
-        "🚫 **Priority:** Review search terms and add negative keywords "
-        "before scaling any campaign."
-    )
-
-    if selected_cpa > 1500:
-        budget_actions.append(
-            f"🟠 **CPA is high at ₹{selected_cpa:,.2f}.** "
-            "Improve conversion efficiency before increasing spend."
-        )
-
-elif waste_ratio >= 10:
-    budget_actions.append(
-        "🟡 **Hold major budget increases.** "
-        "Clean search terms and reduce waste first."
-    )
-
-else:
-    # Only recommend scaling when waste is controlled
-    if not filtered_df.empty:
-        budget_df = filtered_df.copy()
-
-        if (
-            "Cost (₹)" in budget_df.columns
-            and "Conversions" in budget_df.columns
-        ):
-
-            budget_df["AI CPA"] = budget_df.apply(
-                lambda row:
-                    row["Cost (₹)"] / row["Conversions"]
-                    if row["Conversions"] > 0
-                    else float("inf"),
-                axis=1
-            )
-
-            converting_df = budget_df[
-                budget_df["Conversions"] > 0
-            ].copy()
-
-            if not converting_df.empty:
-                best_campaign = converting_df.loc[
-                    converting_df["AI CPA"].idxmin()
-                ]
-
-                best_campaign_name = (
-                    best_campaign["Campaign"]
-                    if "Campaign" in converting_df.columns
-                    else "Best-performing campaign"
-                )
-
-                budget_actions.append(
-                    "🟢 **Increase carefully:** "
-                    f"{best_campaign_name} has the strongest CPA "
-                    f"at ₹{best_campaign['AI CPA']:,.2f}."
-                )
-
-# Zero-conversion spend check
-if not filtered_df.empty:
-    if (
-        "Cost (₹)" in filtered_df.columns
-        and "Conversions" in filtered_df.columns
-    ):
-        zero_conversion_df = filtered_df[
-            (filtered_df["Cost (₹)"] > 0)
-            & (filtered_df["Conversions"] == 0)
-        ].copy()
-
-        if not zero_conversion_df.empty:
-            highest_waste_campaign = zero_conversion_df.loc[
-                zero_conversion_df["Cost (₹)"].idxmax()
-            ]
-
-            zero_campaign_name = (
-                highest_waste_campaign["Campaign"]
-                if "Campaign" in zero_conversion_df.columns
-                else "Zero-conversion campaign"
-            )
-
-            budget_actions.append(
-                "🔴 **Reduce or pause for review:** "
-                f"{zero_campaign_name} spent "
-                f"₹{highest_waste_campaign['Cost (₹)']:,.2f} "
-                "with zero conversions."
-            )
-
-if not budget_actions:
-    budget_actions.append(
-        "🟢 Current budget distribution looks stable. "
-        "Continue monitoring CPA, conversion rate, and waste spend."
-    )
-
-for i, action in enumerate(
-    budget_actions[:5],
-    start=1
-):
-    st.write(
-        f"**{i}. {action}**"
-    )
-
-# -----------------------------
-# TOP 5 ACTIONS NOW
-# -----------------------------
-
-st.subheader("🎯 Top 5 Actions Now")
-
-top_actions = []
-
-if waste_ratio >= 10:
-    top_actions.append(
-        "Review search terms and add negative keywords."
-    )
-
-if selected_cpa > 1500:
-    top_actions.append(
-        "Reduce high-CPA traffic before increasing budget."
-    )
-
-if "health_ctr" in locals() and health_ctr < 3:
-    top_actions.append(
-        "Improve ad copy and keyword relevance to raise CTR."
-    )
-
-if "health_conversion_rate" in locals() and health_conversion_rate < 5:
-    top_actions.append(
-        "Improve landing page and lead conversion flow."
-    )
-
-if selected_conversions > 0:
-    top_actions.append(
-        "Protect campaigns producing real conversions."
-    )
-
-if not top_actions:
-    top_actions.append(
-        "Continue monitoring performance and scale gradually."
-    )
-
-for i, action in enumerate(
-    top_actions[:5],
-    start=1
-):
-    st.write(
-        f"**{i}. {action}**"
-    )
-# ==================================================
-# BEFORE VS AFTER PERFORMANCE INTELLIGENCE
-# ==================================================
-
-st.divider()
-st.header("📊 Before vs After Performance Intelligence")
-
-
-def baf_numeric_series(data, possible_names):
-
-    for column_name in possible_names:
-
-        if column_name in data.columns:
-
-            return pd.to_numeric(
-                data[column_name],
-                errors="coerce"
-            ).fillna(0)
-
-    return pd.Series(
-        0.0,
-        index=data.index
-    )
-
-
-def baf_summary(data):
-
-    impressions = float(
-        baf_numeric_series(
-            data,
-            ["Impressions"]
-        ).sum()
-    )
-
-    clicks = float(
-        baf_numeric_series(
-            data,
-            ["Clicks"]
-        ).sum()
-    )
-
-    cost = float(
-        baf_numeric_series(
-            data,
-            [
-                "Cost",
-                "Cost (₹)",
-                "Spend",
-                "Spend (₹)"
-            ]
-        ).sum()
-    )
-
-    conversions = float(
-        baf_numeric_series(
-            data,
-            ["Conversions"]
-        ).sum()
-    )
-
-    ctr = (
-        clicks / impressions * 100
-        if impressions > 0
-        else 0
-    )
-
-    avg_cpc = (
-        cost / clicks
-        if clicks > 0
-        else 0
-    )
-
-    cpa = (
-        cost / conversions
-        if conversions > 0
-        else 0
-    )
-
-    conversion_rate = (
-        conversions / clicks * 100
-        if clicks > 0
-        else 0
-    )
-
-    return {
-        "Impressions": impressions,
-        "Clicks": clicks,
-        "Cost": cost,
-        "Conversions": conversions,
-        "CTR": ctr,
-        "Avg CPC": avg_cpc,
-        "CPA": cpa,
-        "Conversion Rate": conversion_rate
-    }
-
-
-def baf_pct_change(before_value, after_value):
-
-    if before_value == 0:
-
-        if after_value == 0:
-            return 0
-
-        return 100
-
-    return (
-        (after_value - before_value)
-        / before_value
-    ) * 100
-
-
-if "daily_df" in locals() and not daily_df.empty:
-
-    compare_df = daily_df.copy()
-
-    if "Date" not in compare_df.columns:
-        compare_df = compare_df.reset_index()
-
-    if "Date" not in compare_df.columns:
-        compare_df = compare_df.rename(
-            columns={
-                compare_df.columns[0]: "Date"
-            }
-        )
-
-    compare_df["Date"] = pd.to_datetime(
-        compare_df["Date"],
-        errors="coerce"
-    )
-
-    compare_df = (
-        compare_df
-        .dropna(subset=["Date"])
-        .sort_values("Date")
-        .reset_index(drop=True)
-    )
-
-    # ==============================================
-    # SELECTED PERIOD BOUNDARIES
-    # ==============================================
-
-    if date_option == "Last 30 Days":
-
-        period_end_date = pd.Timestamp(
-            today - timedelta(days=1)
-        )
-
-        period_start_date = (
-            period_end_date
-            - pd.Timedelta(days=29)
-        )
-
-    elif date_option == "Custom Date Range":
-
-        period_start_date = pd.Timestamp(
-            start_date
-        )
-
-        period_end_date = pd.Timestamp(
-            end_date
-        )
-
-    else:
-
-        period_start_date = (
-            compare_df["Date"]
-            .min()
-            .normalize()
-        )
-
-        period_end_date = (
-            compare_df["Date"]
-            .max()
-            .normalize()
-        )
-
-    total_days = (
-        period_end_date
-        - period_start_date
-    ).days + 1
-
-    if total_days >= 2:
-
-        before_days = total_days // 2
-
-        before_start_date = period_start_date
-
-        before_end_date = (
-            before_start_date
-            + pd.Timedelta(
-                days=before_days - 1
-            )
-        )
-
-        after_start_date = (
-            before_end_date
-            + pd.Timedelta(days=1)
-        )
-
-        after_end_date = period_end_date
-
-        after_days = (
-            after_end_date
-            - after_start_date
-        ).days + 1
-
-        before_df = compare_df[
-            (compare_df["Date"] >= before_start_date)
-            &
-            (compare_df["Date"] <= before_end_date)
-        ].copy()
-
-        after_df = compare_df[
-            (compare_df["Date"] >= after_start_date)
-            &
-            (compare_df["Date"] <= after_end_date)
-        ].copy()
-
-        before_metrics = baf_summary(
-            before_df
-        )
-
-        after_metrics = baf_summary(
-            after_df
-        )
-
-        before_start_text = (
-            before_start_date.strftime(
-                "%d %b %Y"
-            )
-        )
-
-        before_end_text = (
-            before_end_date.strftime(
-                "%d %b %Y"
-            )
-        )
-
-        after_start_text = (
-            after_start_date.strftime(
-                "%d %b %Y"
-            )
-        )
-
-        after_end_text = (
-            after_end_date.strftime(
-                "%d %b %Y"
-            )
-        )
-
-        st.caption(
-            f"📅 Before ({before_days} days): "
-            f"{before_start_text} → {before_end_text} | "
-            f"After ({after_days} days): "
-            f"{after_start_text} → {after_end_text}"
-        )
-
-        # ==========================================
-        # CHANGES
-        # ==========================================
-
-        impressions_change = baf_pct_change(
-            before_metrics["Impressions"],
-            after_metrics["Impressions"]
-        )
-
-        clicks_change = baf_pct_change(
-            before_metrics["Clicks"],
-            after_metrics["Clicks"]
-        )
-
-        cost_change = baf_pct_change(
-            before_metrics["Cost"],
-            after_metrics["Cost"]
-        )
-
-        conversions_change = baf_pct_change(
-            before_metrics["Conversions"],
-            after_metrics["Conversions"]
-        )
-
-        ctr_change = baf_pct_change(
-            before_metrics["CTR"],
-            after_metrics["CTR"]
-        )
-
-        cpc_change = baf_pct_change(
-            before_metrics["Avg CPC"],
-            after_metrics["Avg CPC"]
-        )
-
-        cpa_change = baf_pct_change(
-            before_metrics["CPA"],
-            after_metrics["CPA"]
-        )
-
-        conversion_rate_change = baf_pct_change(
-            before_metrics["Conversion Rate"],
-            after_metrics["Conversion Rate"]
-        )
-
-        comparison_table = pd.DataFrame({
-
-            "Metric": [
+            search_data.append({
+                "Search Term": row.search_term_view.search_term,
+                "Campaign": row.campaign.name,
+                "Impressions": search_impressions,
+                "Clicks": search_clicks,
+                "Cost (₹)": round(search_cost, 2),
+                "Conversions": round(search_conversions, 2),
+                "CTR %": round(search_ctr, 2),
+                "Avg CPC (₹)": round(search_cpc, 2),
+                "CPA (₹)": round(search_cpa, 2)
+            })
+
+        search_df = pd.DataFrame(
+            search_data,
+            columns=[
+                "Search Term",
+                "Campaign",
                 "Impressions",
                 "Clicks",
                 "Cost (₹)",
                 "Conversions",
-                "CTR (%)",
+                "CTR %",
                 "Avg CPC (₹)",
-                "CPA (₹)",
-                "Conversion Rate (%)"
-            ],
-
-            "Before": [
-                f"{before_metrics['Impressions']:,.0f}",
-                f"{before_metrics['Clicks']:,.0f}",
-                f"₹{before_metrics['Cost']:,.2f}",
-                f"{before_metrics['Conversions']:,.2f}",
-                f"{before_metrics['CTR']:.2f}%",
-                f"₹{before_metrics['Avg CPC']:,.2f}",
-                f"₹{before_metrics['CPA']:,.2f}",
-                f"{before_metrics['Conversion Rate']:.2f}%"
-            ],
-
-            "After": [
-                f"{after_metrics['Impressions']:,.0f}",
-                f"{after_metrics['Clicks']:,.0f}",
-                f"₹{after_metrics['Cost']:,.2f}",
-                f"{after_metrics['Conversions']:,.2f}",
-                f"{after_metrics['CTR']:.2f}%",
-                f"₹{after_metrics['Avg CPC']:,.2f}",
-                f"₹{after_metrics['CPA']:,.2f}",
-                f"{after_metrics['Conversion Rate']:.2f}%"
-            ],
-
-            "Change": [
-                f"{impressions_change:+.1f}%",
-                f"{clicks_change:+.1f}%",
-                f"{cost_change:+.1f}%",
-                f"{conversions_change:+.1f}%",
-                f"{ctr_change:+.1f}%",
-                f"{cpc_change:+.1f}%",
-                f"{cpa_change:+.1f}%",
-                f"{conversion_rate_change:+.1f}%"
+                "CPA (₹)"
             ]
-        })
-
-        st.dataframe(
-            comparison_table,
-            use_container_width=True,
-            hide_index=True
         )
 
-        # ==========================================
-        # BALANCED PERFORMANCE SCORE
-        # ==========================================
+        st.divider()
+        st.header("🔍 Search Terms Analysis")
 
-        intelligence_score = 50
-        intelligence_notes = []
-
-        # Conversions
-        if conversions_change >= 20:
-
-            intelligence_score += 20
-
-            intelligence_notes.append(
-                f"🟢 Conversions improved strongly by "
-                f"{conversions_change:.1f}%."
+        if not search_df.empty:
+            st.dataframe(
+                search_df,
+                width="stretch",
+                hide_index=True
+            )
+        else:
+            st.info(
+                "No search term data available for the selected date range."
             )
 
-        elif conversions_change >= 10:
+        # ==================================================
+        # DAILY PERFORMANCE
+        # ==================================================
 
-            intelligence_score += 15
+        st.divider()
+        st.header("📅 Daily Performance")
 
-            intelligence_notes.append(
-                f"🟢 Conversions improved by "
-                f"{conversions_change:.1f}%."
-            )
+        daily_query = f"""
+            SELECT
+                segments.date,
+                metrics.impressions,
+                metrics.clicks,
+                metrics.cost_micros,
+                metrics.conversions
+            FROM customer
+            WHERE {date_filter_clause}
+            ORDER BY segments.date
+        """
 
-        elif conversions_change <= -20:
-
-            intelligence_score -= 20
-
-            intelligence_notes.append(
-                f"🔴 Conversions declined strongly by "
-                f"{abs(conversions_change):.1f}%."
-            )
-
-        elif conversions_change <= -10:
-
-            intelligence_score -= 15
-
-            intelligence_notes.append(
-                f"🔴 Conversions declined by "
-                f"{abs(conversions_change):.1f}%."
-            )
-
-        # CPA
-        if cpa_change <= -10:
-
-            intelligence_score += 15
-
-            intelligence_notes.append(
-                f"🟢 CPA improved by "
-                f"{abs(cpa_change):.1f}%."
-            )
-
-        elif cpa_change >= 25:
-
-            intelligence_score -= 15
-
-            intelligence_notes.append(
-                f"🔴 CPA increased significantly by "
-                f"{cpa_change:.1f}%."
-            )
-
-        elif cpa_change >= 10:
-
-            intelligence_score -= 10
-
-            intelligence_notes.append(
-                f"🟠 CPA increased by "
-                f"{cpa_change:.1f}%."
-            )
-
-        # CTR
-        if ctr_change >= 10:
-
-            intelligence_score += 10
-
-            intelligence_notes.append(
-                f"🟢 CTR improved by "
-                f"{ctr_change:.1f}%."
-            )
-
-        elif ctr_change <= -20:
-
-            intelligence_score -= 10
-
-            intelligence_notes.append(
-                f"🔴 CTR declined significantly by "
-                f"{abs(ctr_change):.1f}%."
-            )
-
-        elif ctr_change <= -10:
-
-            intelligence_score -= 5
-
-            intelligence_notes.append(
-                f"🟠 CTR declined by "
-                f"{abs(ctr_change):.1f}%."
-            )
-
-        # Conversion Rate
-        if conversion_rate_change >= 10:
-
-            intelligence_score += 10
-
-            intelligence_notes.append(
-                f"🟢 Conversion Rate improved by "
-                f"{conversion_rate_change:.1f}%."
-            )
-
-        elif conversion_rate_change <= -15:
-
-            intelligence_score -= 10
-
-            intelligence_notes.append(
-                f"🔴 Conversion Rate declined by "
-                f"{abs(conversion_rate_change):.1f}%."
-            )
-
-        elif conversion_rate_change <= -5:
-
-            intelligence_score -= 5
-
-            intelligence_notes.append(
-                f"🟠 Conversion Rate declined by "
-                f"{abs(conversion_rate_change):.1f}%."
-            )
-
-        intelligence_score = max(
-            0,
-            min(
-                100,
-                intelligence_score
-            )
+        daily_response = ga_service.search(
+            customer_id=customer_id,
+            query=daily_query
         )
 
-        # ==========================================
-        # STATUS
-        # ==========================================
+        daily_data = []
 
-        if intelligence_score >= 75:
+        for row in daily_response:
+            daily_impressions = int(row.metrics.impressions or 0)
+            daily_clicks = int(row.metrics.clicks or 0)
+            daily_cost = float(row.metrics.cost_micros or 0) / 1_000_000
+            daily_conversions = float(row.metrics.conversions or 0)
 
-            intelligence_status = (
-                "🟢 Strong Improvement"
+            daily_ctr = (
+                daily_clicks / daily_impressions * 100
+                if daily_impressions > 0
+                else 0
             )
 
-        elif intelligence_score >= 55:
-
-            intelligence_status = (
-                "🟡 Stable / Improving"
+            daily_cpc = (
+                daily_cost / daily_clicks
+                if daily_clicks > 0
+                else 0
             )
 
-        elif intelligence_score >= 35:
+            daily_cpa = (
+                daily_cost / daily_conversions
+                if daily_conversions > 0
+                else 0
+            )
 
-            intelligence_status = (
-                "🟠 Needs Attention"
+            daily_data.append({
+                "Date": str(row.segments.date),
+                "Impressions": daily_impressions,
+                "Clicks": daily_clicks,
+                "Cost": round(daily_cost, 2),
+                "Conversions": round(daily_conversions, 2),
+                "CTR": round(daily_ctr, 2),
+                "CPC": round(daily_cpc, 2),
+                "CPA": round(daily_cpa, 2)
+            })
+
+        daily_df = pd.DataFrame(
+            daily_data,
+            columns=[
+                "Date",
+                "Impressions",
+                "Clicks",
+                "Cost",
+                "Conversions",
+                "CTR",
+                "CPC",
+                "CPA"
+            ]
+        )
+
+        if not daily_df.empty:
+            daily_df["Date"] = pd.to_datetime(
+                daily_df["Date"],
+                errors="coerce"
+            )
+
+            daily_df = (
+                daily_df
+                .dropna(subset=["Date"])
+                .sort_values("Date")
+                .set_index("Date")
+            )
+
+            st.subheader("Daily Performance Trend")
+
+            st.line_chart(
+                daily_df[["Clicks", "Conversions"]],
+                width="stretch"
+            )
+
+            st.subheader("Daily Performance Table")
+
+            st.dataframe(
+                daily_df.reset_index(),
+                width="stretch",
+                hide_index=True
             )
 
         else:
-
-            intelligence_status = (
-                "🔴 Performance Declining"
+            st.info(
+                "No daily performance data available for the selected date range."
             )
 
-        score_col1, score_col2 = st.columns(2)
+        # ==================================================
+        # POTENTIAL WASTE SPEND
+        # ==================================================
 
-        with score_col1:
+        st.divider()
 
-            st.metric(
-                "Performance Intelligence Score",
-                f"{intelligence_score}/100"
-            )
+        st.header("💸 Potential Waste Spend")
 
-        with score_col2:
+        if not search_df.empty:
 
-            st.metric(
-                "Performance Trend",
-                intelligence_status
-            )
+            waste_df = search_df[
+                (search_df["Cost (₹)"] > 0)
+                &
+                (search_df["Conversions"] == 0)
+            ].copy()
 
-        st.progress(
-            intelligence_score / 100
-        )
+            if not waste_df.empty:
 
-        # ==========================================
-        # INTERPRETATION
-        # ==========================================
+                waste_df = waste_df.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
 
-        st.subheader(
-            "🧠 Performance Interpretation"
-        )
+                st.warning(
+                    "These search terms have spend but 0 conversions."
+                )
 
-        if intelligence_notes:
+                st.dataframe(
+                    waste_df,
+                    width="stretch"
+                )
 
-            for note in intelligence_notes:
-                st.write(note)
+            else:
+
+                st.success(
+                    "No major waste spend found."
+                )
 
         else:
-
-            st.write(
-                "🟡 Performance is relatively stable "
-                "between both periods."
-            )
-
-        # ==========================================
-        # RECOMMENDATION - MATCH SCORE
-        # ==========================================
-
-        st.subheader(
-            "🎯 Recommended Next Move"
-        )
-
-        if intelligence_score >= 75:
-
-            st.success(
-                "Overall performance improved strongly. "
-                "Protect winning campaigns and increase "
-                "budget gradually while monitoring CPA."
-            )
-
-        elif intelligence_score >= 55:
 
             st.info(
-                "Performance is generally stable or improving. "
-                "Continue optimizing search terms and scale "
-                "only campaigns with healthy CPA."
+                "No search term data available."
             )
 
-        elif intelligence_score >= 35:
+        # ==================================================
+        # PERFORMANCE INSIGHTS
+        # ==================================================
 
-            st.warning(
-                "Performance is mixed and needs attention. "
-                "Conversions may be improving, but efficiency "
-                "metrics such as CTR, CPA or Conversion Rate "
-                "need optimization before major budget increases."
+        st.divider()
+
+        st.header("🏆 Performance Insights")
+
+        if not filtered_df.empty:
+
+            insights_df = filtered_df.copy()
+
+            # Calculate CTR
+            insights_df["CTR (%)"] = (
+                insights_df["Clicks"]
+                / insights_df["Impressions"].replace(0, 1)
+                * 100
+            )
+
+            # Calculate CPA
+            insights_df["CPA (₹)"] = insights_df.apply(
+                lambda row:
+                row["Cost (₹)"] / row["Conversions"]
+                if row["Conversions"] > 0 else 0,
+                axis=1
+            )
+
+            best_campaign = insights_df.loc[
+                insights_df["Conversions"].idxmax()
+            ]
+
+            highest_spend = insights_df.loc[
+                insights_df["Cost (₹)"].idxmax()
+            ]
+
+            highest_ctr = insights_df.loc[
+                insights_df["CTR (%)"].idxmax()
+            ]
+
+            campaigns_with_conversions = insights_df[
+                insights_df["Conversions"] > 0
+            ]
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "🎯 Best Conversions",
+                    best_campaign["Campaign"],
+                    f'{best_campaign["Conversions"]:.0f} conversions'
+                )
+
+            with col2:
+                st.metric(
+                    "💰 Highest Spend",
+                    highest_spend["Campaign"],
+                    f'₹{highest_spend["Cost (₹)"]:,.2f}'
+                )
+
+            with col3:
+                st.metric(
+                    "📈 Highest CTR",
+                    highest_ctr["Campaign"],
+                    f'{highest_ctr["CTR (%)"]:.2f}%'
+                )
+
+            if not campaigns_with_conversions.empty:
+
+                best_cpa = campaigns_with_conversions.loc[
+                    campaigns_with_conversions["CPA (₹)"].idxmin()
+                ]
+
+                st.success(
+                    f'🏆 Best CPA Campaign: '
+                    f'{best_cpa["Campaign"]} | '
+                    f'CPA: ₹{best_cpa["CPA (₹)"]:,.2f}'
+                )
+
+            else:
+
+                st.info(
+                    "No campaigns with conversions available for CPA analysis."
+                )
+
+        else:
+
+            st.info(
+                "No campaign data available."
+            )
+        # ==================================================
+        # SMART ALERTS
+        # ==================================================
+
+        st.divider()
+        st.header("🚨 Smart Alerts")
+
+        alerts = []
+
+        # High CPA Alert
+        if overall_cpa > 2000:
+            alerts.append(
+                f"🔴 High CPA Alert: Your CPA is ₹{overall_cpa:,.2f}. "
+                "Consider reducing spend on expensive keywords."
+            )
+
+        # Low CTR Alert
+        if overall_ctr < 3:
+            alerts.append(
+                f"⚠️ Low CTR Alert: Your CTR is {overall_ctr:.2f}%. "
+                "Improve ad copy and keyword relevance."
+            )
+
+        # Low Conversion Rate Alert
+        if overall_conversion_rate < 2:
+            alerts.append(
+                f"⚠️ Low Conversion Rate: {overall_conversion_rate:.2f}%. "
+                "Review landing page and search terms."
+            )
+
+        # High CPC Alert
+        if overall_cpc > 60:
+            alerts.append(
+                f"💰 High CPC Alert: Average CPC is ₹{overall_cpc:.2f}. "
+                "Focus on high-intent keywords."
+            )
+
+        # Waste Spend Alert
+        if 'waste_df' in locals() and not waste_df.empty:
+
+            total_waste = waste_df["Cost (₹)"].sum()
+
+            if total_waste > 500:
+
+                alerts.append(
+                    f"🔴 Potential Waste Spend: ₹{total_waste:,.2f} spent "
+                    "on search terms with 0 conversions."
+                )
+
+
+        # DISPLAY ALERTS
+
+        if alerts:
+
+            for alert in alerts:
+
+                st.warning(alert)
+
+        else:
+
+            st.success(
+                "🟢 Great! No major performance alerts detected."
+            )
+        # ==================================================
+        # CAMPAIGN RECOMMENDATIONS
+        # ==================================================
+
+        st.divider()
+        st.header("🎯 Campaign Recommendations")
+
+        if not filtered_df.empty:
+
+            recommendations = []
+
+            for _, row in filtered_df.iterrows():
+
+                campaign = row["Campaign"]
+                cost = float(row["Cost (₹)"])
+                conversions = float(row["Conversions"])
+                clicks = float(row["Clicks"])
+                impressions = float(row["Impressions"])
+
+                ctr = (
+                    clicks / impressions * 100
+                    if impressions > 0
+                    else 0
+                )
+
+                cpa = (
+                    cost / conversions
+                    if conversions > 0
+                    else 0
+                )
+
+                if conversions == 0 and cost > 500:
+
+                    status = "🔴 Review / Pause"
+                    recommendation = (
+                        "High spend with 0 conversions. "
+                        "Review keywords and search terms."
+                    )
+
+                elif conversions > 0 and cpa > overall_cpa:
+
+                    status = "⚠️ Optimize"
+                    recommendation = (
+                        f"CPA is ₹{cpa:,.2f}. "
+                        "Reduce waste and improve keyword targeting."
+                    )
+
+                elif conversions > 0 and cpa <= overall_cpa:
+
+                    status = "🟢 Scale"
+                    recommendation = (
+                        f"Good CPA of ₹{cpa:,.2f}. "
+                        "Consider increasing budget."
+                    )
+
+                elif ctr > overall_ctr and conversions == 0:
+
+                    status = "🟡 Check Landing Page"
+                    recommendation = (
+                        "Good CTR but no conversions. "
+                        "Review landing page and conversion tracking."
+                    )
+
+                else:
+
+                    status = "🟡 Monitor"
+                    recommendation = (
+                        "Continue monitoring campaign performance."
+                    )
+
+                recommendations.append({
+                    "Campaign": campaign,
+                    "Status": status,
+                    "Recommendation": recommendation
+                })
+
+            if recommendations:
+
+                recommendation_df = pd.DataFrame(recommendations)
+
+                st.dataframe(
+                    recommendation_df,
+                    width="stretch",
+                    hide_index=True
+                )
+
+            else:
+
+                st.info(
+                    "No campaign recommendations available."
+                )
+
+        else:
+
+            st.info(
+                "No campaign data available for recommendations."
+            )
+            
+           # ==================================================
+        # BUDGET OPTIMIZATION
+        # ==================================================
+
+        st.divider()
+        st.header("💰 Budget Optimization Suggestions")
+
+        if not filtered_df.empty:
+
+            budget_suggestions = []
+
+            for _, row in filtered_df.iterrows():
+
+                campaign = row["Campaign"]
+                cost = float(row["Cost (₹)"])
+                conversions = float(row["Conversions"])
+
+                cpa = (
+                    cost / conversions
+                    if conversions > 0 else 0
+                )
+
+                if conversions == 0 and cost > 500:
+
+                    action = "🔴 Reduce / Stop"
+                    suggestion = (
+                        "Spend is high but there are no conversions. "
+                        "Reduce budget and review search terms."
+                    )
+
+                elif conversions > 0 and cpa < overall_cpa * 0.8:
+
+                    action = "🟢 Increase Budget"
+                    suggestion = (
+                        f"Strong performance with CPA ₹{cpa:,.2f}. "
+                        "Consider increasing budget by 10–20%."
+                    )
+
+                elif conversions > 0 and cpa > overall_cpa * 1.2:
+
+                    action = "🟠 Reduce Budget"
+                    suggestion = (
+                        f"CPA ₹{cpa:,.2f} is above average. "
+                        "Optimize keywords before increasing spend."
+                    )
+
+                else:
+
+                    action = "🟡 Maintain"
+                    suggestion = (
+                        "Performance is close to account average. "
+                        "Keep budget stable and continue monitoring."
+                    )
+
+                budget_suggestions.append({
+                    "Campaign": campaign,
+                    "Cost (₹)": round(cost, 2),
+                    "Conversions": round(conversions, 2),
+                    "CPA (₹)": round(cpa, 2) if conversions > 0 else "N/A",
+                    "Action": action,
+                    "Suggestion": suggestion
+                })
+
+
+            budget_df = pd.DataFrame(budget_suggestions)
+
+            st.dataframe(
+                budget_df,
+                width="stretch",
+                hide_index=True
             )
 
         else:
 
-            st.error(
-                "Overall performance is declining. "
-                "Reduce waste, review search terms, bids, "
-                "ad relevance and landing-page quality "
-                "before increasing budget."
+            st.info(
+                "No campaign data available for budget optimization."
             )
-
-    else:
-
-        st.info(
-            "At least 2 days of data are required "
-            "for Before vs After comparison."
-        )
-
-else:
-
-    st.info(
-        "Daily performance data is not available."
-    )    
-# ==================================================
-# ASK AI
-# ==================================================
-
-st.divider()
-st.header("🤖 Ask AI About Your Campaign")
-
-# ==================================================
-# CHAT HISTORY
-# ==================================================
-
-if "ai_chat_history" not in st.session_state:
-    st.session_state.ai_chat_history = []
-
-if date_option == "Custom Date Range":
-    current_ai_period = (
-        f"{date_option}:"
-        f"{start_date:%Y-%m-%d}:"
-        f"{end_date:%Y-%m-%d}"
-    )
-else:
-    current_ai_period = date_option
-
-if "ai_chat_period" not in st.session_state:
-    st.session_state.ai_chat_period = current_ai_period
-
-elif st.session_state.ai_chat_period != current_ai_period:
-    st.session_state.ai_chat_history = []
-    st.session_state.ai_chat_period = current_ai_period
-
-if st.button(
-    "🗑️ Clear AI Chat",
-    key="clear_ai_chat_button"
-):
-    st.session_state.ai_chat_history = []
-    st.rerun()
-
-for message in st.session_state.ai_chat_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# ==================================================
-# QUESTION BOX
-# ==================================================
-
-question = st.text_input(
-    "Ask a question about your campaigns",
-    placeholder="Example: గత 30 రోజుల్లో performance ఎలా ఉంది?",
-    key="ask_ai_question"
-)
-
-pending_ai_question = st.session_state.pop(
-    "pending_ai_question",
-    None
-)
-
-analyze_clicked = st.button(
-    "Analyze with AI",
-    key="ask_ai_analyze_button"
-)
-
-if pending_ai_question:
-    question = pending_ai_question
-
-# ==================================================
-# ANALYZE
-# ==================================================
-
-if analyze_clicked or pending_ai_question:
-
-    if question and question.strip():
-
-        question = question.strip()
-        question_lower = question.lower()
+               
 
         # ==================================================
-        # DETECT DATE RANGE
+        # ADVANCED AI NEGATIVE KEYWORD INTELLIGENCE V2
         # ==================================================
 
-        requested_date_option = None
+        st.divider()
+        st.header("🚫 Advanced AI Negative Keyword Intelligence")
 
-        if any(
-            phrase in question_lower
-            for phrase in [
-                "today",
-                "ఈ రోజు",
-                "ఈరోజు"
-            ]
-        ):
-            requested_date_option = "Today"
 
-        elif any(
-            phrase in question_lower
-            for phrase in [
-                "last 7 days",
-                "గత 7 రోజులు",
-                "గత 7 రోజుల్లో",
-                "7 days"
-            ]
-        ):
-            requested_date_option = "Last 7 Days"
-
-        elif any(
-            phrase in question_lower
-            for phrase in [
-                "last 30 days",
-                "గత 30 రోజులు",
-                "గత 30 రోజుల్లో",
-                "30 days"
-            ]
-        ):
-            requested_date_option = "Last 30 Days"
-
-        elif any(
-            phrase in question_lower
-            for phrase in [
-                "last 90 days",
-                "గత 90 రోజులు",
-                "గత 90 రోజుల్లో",
-                "90 days"
-            ]
-        ):
-            requested_date_option = "Last 90 Days"
-
-        elif any(
-            phrase in question_lower
-            for phrase in [
-                "last 6 months",
-                "గత 6 నెలలు",
-                "గత 6 నెలల్లో",
-                "6 months"
-            ]
-        ):
-            requested_date_option = "Last 6 Months"
-
-        elif any(
-            phrase in question_lower
-            for phrase in [
-                "last 1 year",
-                "last year",
-                "గత 1 సంవత్సరం",
-                "గత సంవత్సరం",
-                "1 year"
-            ]
-        ):
-            requested_date_option = "Last 1 Year"
-
-        # ==================================================
-        # AUTO DATE CHANGE + SAME QUESTION
-        # ==================================================
-
-        if (
-            requested_date_option
-            and requested_date_option != date_option
-        ):
-            st.session_state.pending_ai_date_option = (
-                requested_date_option
-            )
-
-            st.session_state.pending_ai_question = question
-            st.session_state.ai_chat_history = []
-
-            st.rerun()
-
-        # Save user message only after correct date data loads
-        st.session_state.ai_chat_history.append(
-            {
-                "role": "user",
-                "content": question
-            }
-        )
-
-        # ==================================================
-        # SEARCH TERMS CONTEXT
-        # ==================================================
+        # --------------------------------------------------
+        # CHECK SEARCH TERM DATA
+        # --------------------------------------------------
 
         if "search_df" in locals() and not search_df.empty:
 
-            search_terms_for_ai = search_df.copy()
-
-            required_columns = {
+            required_columns = [
                 "Search Term",
-                "Campaign",
                 "Clicks",
                 "Cost (₹)",
                 "Conversions"
-            }
-
-            if required_columns.issubset(
-                search_terms_for_ai.columns
-            ):
-                search_terms_for_ai = (
-                    search_terms_for_ai
-                    .groupby(
-                        ["Search Term", "Campaign"],
-                        as_index=False
-                    )
-                    .agg(
-                        {
-                            "Clicks": "sum",
-                            "Cost (₹)": "sum",
-                            "Conversions": "sum"
-                        }
-                    )
-                    .sort_values(
-                        "Cost (₹)",
-                        ascending=False
-                    )
-                    .head(100)
-                )
-
-            else:
-                search_terms_for_ai = (
-                    search_terms_for_ai.head(100)
-                )
-
-            search_terms_context = (
-                search_terms_for_ai.to_string(
-                    index=False
-                )
-            )
-
-            search_terms_available = True
-
-        else:
-            search_terms_context = (
-                "No Search Terms data is available "
-                "for the selected date range."
-            )
-
-            search_terms_available = False
-
-        # ==================================================
-        # BEFORE VS AFTER CONTEXT
-        # ==================================================
-
-        if (
-            "comparison_data" in locals()
-            and not comparison_data.empty
-        ):
-            before_after_context = (
-                comparison_data.to_string(index=False)
-            )
-        else:
-            before_after_context = (
-                "No Before vs After comparison data is available."
-            )
-
-        # ==================================================
-        # NEGATIVE KEYWORD QUESTION
-        # ==================================================
-
-        negative_keyword_question = any(
-            phrase in question_lower
-            for phrase in [
-                "negative keyword",
-                "negative keywords",
-                "నెగటివ్",
-                "నెగెటివ్"
             ]
-        )
 
-        if (
-            negative_keyword_question
-            and not search_terms_available
-        ):
+            missing_columns = [
+                col
+                for col in required_columns
+                if col not in search_df.columns
+            ]
 
-            telugu_question = any(
-                "\u0c00" <= char <= "\u0c7f"
-                for char in question
+            if missing_columns:
+
+                st.warning(
+                    "Required search-term columns are missing: "
+                    + ", ".join(missing_columns)
+                )
+
+            else:
+
+                negative_candidates = search_df[
+                    (search_df["Conversions"] == 0)
+                    &
+                    (search_df["Cost (₹)"] > 0)
+                ].copy()
+
+                negative_candidates = negative_candidates.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
+
+
+                # ==========================================
+                # SUMMARY METRICS
+                # ==========================================
+
+                if not negative_candidates.empty:
+
+                    candidate_count = len(
+                        negative_candidates
+                    )
+
+                    candidate_spend = float(
+                        negative_candidates[
+                            "Cost (₹)"
+                        ].sum()
+                    )
+
+                    candidate_clicks = float(
+                        negative_candidates[
+                            "Clicks"
+                        ].sum()
+                    )
+
+                    top_candidate_spend = float(
+                        negative_candidates[
+                            "Cost (₹)"
+                        ].max()
+                    )
+
+
+                    neg_col1, neg_col2, neg_col3, neg_col4 = (
+                        st.columns(4)
+                    )
+
+                    with neg_col1:
+
+                        st.metric(
+                            "Terms to Review",
+                            f"{candidate_count:,}"
+                        )
+
+                    with neg_col2:
+
+                        st.metric(
+                            "Spend Under Review",
+                            f"₹{candidate_spend:,.2f}"
+                        )
+
+                    with neg_col3:
+
+                        st.metric(
+                            "Clicks Under Review",
+                            f"{candidate_clicks:,.0f}"
+                        )
+
+                    with neg_col4:
+
+                        st.metric(
+                            "Highest Single-Term Spend",
+                            f"₹{top_candidate_spend:,.2f}"
+                        )
+
+
+                    # ======================================
+                    # RAW REVIEW TABLE
+                    # ======================================
+
+                    st.subheader(
+                        "🔍 Zero-Conversion Search Terms to Review"
+                    )
+
+
+                    display_columns = [
+                        "Search Term"
+                    ]
+
+                    if "Campaign" in negative_candidates.columns:
+                        display_columns.append(
+                            "Campaign"
+                        )
+
+                    display_columns.extend(
+                        [
+                            "Clicks",
+                            "Cost (₹)",
+                            "Conversions"
+                        ]
+                    )
+
+
+                    st.dataframe(
+                        negative_candidates[
+                            display_columns
+                        ],
+                        width="stretch",
+                        hide_index=True
+                    )
+
+
+                    st.info(
+                        "Zero conversions alone does NOT mean a search term "
+                        "should become a negative keyword. "
+                        "The AI below protects your brand and core services."
+                    )
+
+
+                    # ======================================
+                    # AI ANALYSIS BUTTON
+                    # ======================================
+
+                    if st.button(
+                        "🧠 Run Advanced Negative Keyword Intelligence",
+                        key="advanced_negative_keyword_v2_button"
+                    ):
+
+                        negative_context = (
+                            negative_candidates
+                            .head(50)
+                            .to_string(
+                                index=False
+                            )
+                        )
+
+
+                        negative_prompt = f"""
+        You are a senior Google Ads Search Term Intelligence specialist.
+
+        Your job is NOT to create as many negative keywords as possible.
+
+        Your job is to protect qualified leads while identifying only genuinely wasteful or irrelevant traffic.
+
+        BUSINESS:
+        Harekrishna Home Care Services.
+
+        PRIMARY LOCATION:
+        Hyderabad.
+
+        CORE BUSINESS SERVICES:
+        - Home care
+        - Elderly care
+        - Senior care
+        - Patient care
+        - Nursing care
+        - Nurse at home
+        - Home nurse
+        - Caretaker
+        - Care taker
+        - Baby care
+        - Babysitter
+        - Nanny
+        - Maid
+        - Domestic help
+        - Housekeeping
+        - Housekeeper
+        - Cook services
+
+        PROTECTED OWN-BRAND TERMS:
+        - hare krishna
+        - harekrishna
+        - hare krishna home care
+        - harekrishna home care
+        - hare krishna home care services
+        - harekrishna home care services
+
+        PROTECTED CORE SERVICE TERMS:
+        - home care
+        - homecare
+        - elderly care
+        - senior care
+        - patient care
+        - nursing
+        - nurse
+        - home nurse
+        - caretaker
+        - care taker
+        - baby care
+        - babysitter
+        - nanny
+        - maid
+        - domestic help
+        - housekeeping
+        - housekeeper
+        - cook
+
+
+        ==================================================
+        MANDATORY PROTECTION RULES
+        ==================================================
+
+        1. NEVER recommend the user's own Harekrishna / Hare Krishna brand
+           as a negative keyword.
+
+        2. Own-brand searches must normally be classified as:
+           KEEP
+           Intent = BRAND / LEAD
+           Risk = PROTECTED
+
+        3. NEVER recommend a core service term as a negative keyword
+           merely because it has zero conversions.
+
+        4. Zero conversions alone is NOT enough evidence to block a term.
+
+        5. Maid and domestic-help searches are valid services for this business.
+           NEVER recommend "maid" or "domestic help" as global negatives.
+
+        6. Nursing, nurse, caretaker, elderly care, patient care,
+           baby care and home care are protected service themes.
+
+        7. If a protected service appears with irrelevant intent,
+           block ONLY the irrelevant modifier.
+
+        Examples:
+
+        "maid jobs hyderabad"
+        Suggested Negative = jobs
+        NOT maid
+
+        "nurse salary"
+        Suggested Negative = salary
+        NOT nurse
+
+        "caretaker vacancy"
+        Suggested Negative = vacancy
+        NOT caretaker
+
+        "home care course"
+        Suggested Negative = course
+        NOT home care
+
+        "nursing training institute"
+        Suggested Negative = training
+        or institute
+        NOT nursing
+
+        8. If a search term is a valid service but may belong in another campaign,
+           classify it as REVIEW and suggest CAMPAIGN ROUTING.
+           Do NOT make the valid service itself negative.
+
+        9. Competitor-brand searches should normally be REVIEW,
+           not automatically ADD AS NEGATIVE.
+
+        10. Wrong-location terms should be carefully reviewed.
+            Do not block a whole city/state unless the location intent is clearly
+            outside the business target and there is no valid reason to keep it.
+
+        11. Never invent conversion, lead-quality, campaign or revenue data.
+
+
+        ==================================================
+        INTENT CLASSIFICATION
+        ==================================================
+
+        Classify each search term into ONE primary intent:
+
+        LEAD
+        BRAND
+        JOB
+        TRAINING
+        INFORMATIONAL
+        COMPETITOR
+        WRONG LOCATION
+        UNRELATED SERVICE
+        AMBIGUOUS
+
+
+        ==================================================
+        ACTION CLASSIFICATION
+        ==================================================
+
+        Choose ONE:
+
+        KEEP
+        REVIEW
+        ADD AS NEGATIVE
+
+
+        ==================================================
+        RISK CLASSIFICATION
+        ==================================================
+
+        Choose ONE:
+
+        PROTECTED
+        LOW RISK TO BLOCK
+        MEDIUM RISK
+        HIGH RISK TO BLOCK
+
+
+        ==================================================
+        CONFIDENCE SCORE
+        ==================================================
+
+        Give a Confidence Score from 0% to 100%.
+
+        Use high confidence only when intent is very clear.
+
+        Examples:
+
+        jobs / vacancies / salary / recruitment:
+        usually high-confidence negative modifiers.
+
+        course / training / institute / certification:
+        usually high-confidence negative modifiers.
+
+        own brand:
+        100% protected.
+
+        valid home-care service:
+        high confidence KEEP.
+
+        ambiguous or competitor term:
+        usually REVIEW rather than automatic negative.
+
+
+        ==================================================
+        MATCH TYPE RULES
+        ==================================================
+
+        For negative recommendations choose:
+
+        Phrase
+        or
+        Exact
+
+        Prefer conservative match types.
+
+        Do NOT recommend broad blocking that could remove qualified traffic.
+
+
+        ==================================================
+        COMMON SAFE NEGATIVE INTENT
+        ==================================================
+
+        These may be negative modifiers when clearly irrelevant:
+
+        jobs
+        job
+        vacancy
+        vacancies
+        salary
+        career
+        careers
+        recruitment
+        resume
+        course
+        courses
+        training
+        institute
+        certification
+        exam
+
+        But first verify that the modifier is genuinely irrelevant.
+
+
+        ==================================================
+        CAMPAIGN ROUTING
+        ==================================================
+
+        If the term is relevant but belongs to another service category,
+        do NOT block it.
+
+        Instead recommend routing such as:
+
+        Nursing Campaign
+        Patient Care Campaign
+        Elderly Care Campaign
+        Baby Care Campaign
+        Domestic Help Campaign
+        Caretaker Campaign
+
+
+        ==================================================
+        SEARCH TERM DATA
+        ==================================================
+
+        The following terms have spend and zero conversions:
+
+        {negative_context}
+
+
+        ==================================================
+        OUTPUT TABLE
+        ==================================================
+
+        Return a clear Markdown table with these columns:
+
+        Search Term
+        Campaign
+        Spend
+        Clicks
+        Intent
+        Recommended Action
+        Suggested Negative Keyword
+        Suggested Match Type
+        Confidence Score
+        Risk Level
+        Campaign Routing
+        Reason
+        Priority
+
+
+        ==================================================
+        PRIORITY RULES
+        ==================================================
+
+        HIGH:
+        Clearly irrelevant intent + meaningful spend/clicks.
+
+        MEDIUM:
+        Ambiguous, competitor, wrong-location or routing issue.
+
+        LOW:
+        Low evidence, small data sample or potentially relevant intent.
+
+
+        ==================================================
+        AFTER THE TABLE
+        ==================================================
+
+        Provide these sections:
+
+        1. 🔴 Safe Negatives to Apply Now
+           - Only high-confidence, low-risk negatives.
+
+        2. 🛡 Protected Terms — Never Block
+           - Own brand and valid service terms found in the data.
+
+        3. 🟡 Review Before Blocking
+           - Ambiguous / competitor / location terms.
+
+        4. 🔀 Campaign Routing Opportunities
+           - Relevant terms that belong in another campaign.
+
+        5. 💸 Highest Waste-Priority Terms
+           - Rank by actual spend from the supplied data.
+           - Do not invent savings.
+
+        6. 🎯 Top 5 Actions
+           - Practical next steps.
+
+        IMPORTANT:
+        Be conservative.
+        Protect qualified customer traffic.
+        Do not force a negative recommendation when no safe negative exists.
+        Never invent data.
+        """
+
+
+                        with st.spinner(
+                            "AI is classifying search-term intent and risk..."
+                        ):
+
+                            negative_ai_response = (
+                                openai_client.responses.create(
+                                    model="gpt-5.4-mini",
+                                    input=negative_prompt
+                                )
+                            )
+
+
+                        st.subheader(
+                            "🤖 Advanced Negative Keyword Intelligence"
+                        )
+
+                        st.write(
+                            negative_ai_response.output_text
+                        )
+
+
+                else:
+
+                    st.success(
+                        "No search terms with spend and zero conversions "
+                        "were found for the selected data."
+                    )
+
+
+        else:
+
+            st.info(
+                "Search term data is not available."
             )
 
-            if telugu_question:
-                assistant_text = (
-                    f"Selected date range **{date_option}** లో "
-                    "Search Terms data అందుబాటులో లేదు. "
-                    "కాబట్టి actual Search Terms ఆధారంగా "
-                    "negative keywords‌ను confirm చేయలేను. "
-                    "నేను ఊహించి negative keywords suggest చేయను."
+           # ==================================================
+        # AI PRIORITY ACTION CENTER
+        # ==================================================
+
+        st.divider()
+        st.header("🎯 AI Priority Action Center")
+
+        priority_actions = []
+
+        # HIGH CPA
+        if overall_cpa > 2000 and total_conversions > 0:
+
+            priority_actions.append({
+                "Priority": "🔴 HIGH",
+                "Area": "CPA",
+                "Problem": f"CPA is high at ₹{overall_cpa:,.2f}",
+                "Action": "Reduce waste spend and focus budget on converting campaigns."
+            })
+
+
+        # ZERO / LOW CONVERSIONS
+        if total_conversions == 0:
+
+            priority_actions.append({
+                "Priority": "🔴 HIGH",
+                "Area": "Conversions",
+                "Problem": "No conversions recorded.",
+                "Action": "Check conversion tracking, search terms, keywords and landing page."
+            })
+
+        elif overall_conversion_rate < 2:
+
+            priority_actions.append({
+                "Priority": "🟠 MEDIUM",
+                "Area": "Conversion Rate",
+                "Problem": f"Conversion rate is only {overall_conversion_rate:.2f}%",
+                "Action": "Improve landing page relevance and focus on high-intent keywords."
+            })
+
+
+        # HIGH CPC
+        if overall_cpc > 60:
+
+            priority_actions.append({
+                "Priority": "🟠 MEDIUM",
+                "Area": "CPC",
+                "Problem": f"Average CPC is ₹{overall_cpc:.2f}",
+                "Action": "Review expensive keywords, match types and search terms."
+            })
+
+
+        # WASTE SPEND
+        if "waste_df" in locals() and not waste_df.empty:
+
+            waste_amount = waste_df["Cost (₹)"].sum()
+
+            if waste_amount > 500:
+
+                priority_actions.append({
+                    "Priority": "🔴 HIGH",
+                    "Area": "Waste Spend",
+                    "Problem": f"₹{waste_amount:,.2f} spent with zero conversions.",
+                    "Action": "Review these search terms and add irrelevant terms as negatives."
+                })
+
+
+        # GOOD CTR
+        if overall_ctr >= 8:
+
+            priority_actions.append({
+                "Priority": "🟢 GOOD",
+                "Area": "CTR",
+                "Problem": f"CTR is strong at {overall_ctr:.2f}%",
+                "Action": "Keep strong ads running and focus on conversion quality."
+            })
+
+
+        if priority_actions:
+
+            priority_df = pd.DataFrame(
+                priority_actions
+            )
+
+            priority_order = {
+                "🔴 HIGH": 1,
+                "🟠 MEDIUM": 2,
+                "🟢 GOOD": 3
+            }
+
+            priority_df["Order"] = (
+                priority_df["Priority"]
+                .map(priority_order)
+            )
+
+            priority_df = (
+                priority_df
+                .sort_values("Order")
+                .drop(columns=["Order"])
+            )
+
+            st.dataframe(
+                priority_df,
+                width="stretch",
+                hide_index=True
+            )
+
+        else:
+
+            st.success(
+                "🟢 No major actions required right now."
+            )
+         
+        # ==================================================
+        # # ONE-CLICK AI PERFORMANCE REPORT
+        # ==================================================
+
+        st.divider()
+        st.header("📋 One-Click AI Performance Report")
+
+        if date_option == "Today":
+            report_period = "Today's"
+
+        elif date_option == "Custom Date Range":
+            report_period = (
+                f"{start_date.strftime('%d %b %Y')} → "
+                f"{end_date.strftime('%d %b %Y')}"
+            )
+
+        else:
+            report_period = date_option
+
+
+        if st.button(
+            "Generate AI Performance Report",
+            key="one_click_ai_report_generate_button_v2"
+        ):
+
+            if "priority_df" in locals() and not priority_df.empty:
+                priority_context = priority_df.to_string(index=False)
+            else:
+                priority_context = "No priority actions currently available."
+
+            daily_report_prompt = f"""
+        You are a senior Google Ads performance analyst.
+
+        REPORT PERIOD:
+        {report_period}
+
+        OVERALL PERFORMANCE:
+
+        Impressions: {total_impressions}
+        Clicks: {total_clicks}
+        Cost: ₹{total_cost:.2f}
+        Conversions: {total_conversions:.2f}
+        CTR: {overall_ctr:.2f}%
+        Average CPC: ₹{overall_cpc:.2f}
+        CPA: ₹{overall_cpa:.2f}
+        Conversion Rate: {overall_conversion_rate:.2f}%
+
+        CAMPAIGN DATA:
+
+        {filtered_df.to_string(index=False)}
+
+        PRIORITY ACTIONS:
+
+        {priority_context}
+
+        Create a professional Google Ads performance report.
+
+        Include:
+
+        1. Executive Summary
+        2. What Is Working Well
+        3. Problems Detected
+        4. Waste Spend Analysis
+        5. Campaign Performance
+        6. Budget Recommendations
+        7. Conversion Improvement Opportunities
+        8. Top Priority Actions
+        9. Final Recommendation
+
+        Be practical, clear and concise.
+        """
+
+            with st.spinner(
+                "AI is generating your performance report..."
+            ):
+
+                daily_ai_response = openai_client.responses.create(
+                    model="gpt-5.4-mini",
+                    input=daily_report_prompt
+                )
+
+            st.subheader(
+                f"🤖 {report_period} AI Performance Report"
+            )
+
+            st.write(
+                daily_ai_response.output_text
+            )
+
+
+        # ==================================================
+        # FINAL AI RECOMMENDATIONS SUMMARY
+        # ==================================================
+
+        st.divider()
+        st.header("📌 Final AI Recommendations Summary")
+
+        summary_actions = []
+
+        if total_conversions == 0:
+            summary_actions.append(
+                "🔴 Check conversion tracking and landing page immediately."
+            )
+
+        if overall_cpc > 60:
+            summary_actions.append(
+                f"🟠 Avg CPC is high at ₹{overall_cpc:.2f}. Review expensive keywords."
+            )
+
+        if overall_cpa > 2000 and total_conversions > 0:
+            summary_actions.append(
+                f"🔴 CPA is high at ₹{overall_cpa:.2f}. Reduce waste and optimize targeting."
+            )
+
+        if "waste_df" in locals() and not waste_df.empty:
+            waste_amount = waste_df["Cost (₹)"].sum()
+
+            summary_actions.append(
+                f"🔴 Review ₹{waste_amount:,.2f} potential waste spend."
+            )
+
+        if overall_ctr >= 8:
+            summary_actions.append(
+                f"🟢 CTR is strong at {overall_ctr:.2f}%. Keep high-performing ads running."
+            )
+
+        if summary_actions:
+            for i, action in enumerate(
+                summary_actions[:5],
+                start=1
+            ):
+                st.write(
+                    f"**{i}. {action}**"
+                )
+        else:
+            st.success(
+                "🟢 Account performance looks stable. Continue monitoring."
+            )
+
+        # ==================================================
+        # ACCOUNT HEALTH SCORE
+        # ==================================================
+
+        st.divider()
+        st.header("🧠 Account Health Score")
+
+        # Use the currently selected campaign/date-range data
+        health_impressions = float(filtered_df["Impressions"].sum()) if "Impressions" in filtered_df.columns else 0
+        health_clicks = float(filtered_df["Clicks"].sum()) if "Clicks" in filtered_df.columns else 0
+        health_cost = float(filtered_df["Cost (₹)"].sum()) if "Cost (₹)" in filtered_df.columns else 0
+        health_conversions = float(filtered_df["Conversions"].sum()) if "Conversions" in filtered_df.columns else 0
+
+        health_ctr = (
+            (health_clicks / health_impressions) * 100
+            if health_impressions > 0 else 0
+        )
+
+        health_cpc = (
+            health_cost / health_clicks
+            if health_clicks > 0 else 0
+        )
+
+        health_cpa = (
+            health_cost / health_conversions
+            if health_conversions > 0 else 0
+        )
+
+        health_conversion_rate = (
+            (health_conversions / health_clicks) * 100
+            if health_clicks > 0 else 0
+        )
+
+        health_score = 100
+        health_notes = []
+
+        # CTR
+        if health_ctr < 3:
+            health_score -= 20
+            health_notes.append(f"🔴 CTR is low at {health_ctr:.2f}%.")
+        elif health_ctr < 6:
+            health_score -= 10
+            health_notes.append(f"🟠 CTR needs improvement at {health_ctr:.2f}%.")
+        else:
+            health_notes.append(f"🟢 CTR is healthy at {health_ctr:.2f}%.")
+
+        # CPC
+        if health_cpc > 60:
+            health_score -= 15
+            health_notes.append(f"🔴 CPC is high at ₹{health_cpc:.2f}.")
+        elif health_cpc > 40:
+            health_score -= 8
+            health_notes.append(f"🟠 CPC is moderately high at ₹{health_cpc:.2f}.")
+        else:
+            health_notes.append(f"🟢 CPC is under control at ₹{health_cpc:.2f}.")
+
+        # Conversion Rate
+        if health_conversion_rate < 2:
+            health_score -= 20
+            health_notes.append(
+                f"🔴 Conversion Rate is low at {health_conversion_rate:.2f}%."
+            )
+        elif health_conversion_rate < 5:
+            health_score -= 10
+            health_notes.append(
+                f"🟠 Conversion Rate needs improvement at {health_conversion_rate:.2f}%."
+            )
+        else:
+            health_notes.append(
+                f"🟢 Conversion Rate is healthy at {health_conversion_rate:.2f}%."
+            )
+
+        # CPA
+        if health_conversions > 0:
+            if health_cpa > 2000:
+                health_score -= 20
+                health_notes.append(f"🔴 CPA is high at ₹{health_cpa:.2f}.")
+            elif health_cpa > 1000:
+                health_score -= 10
+                health_notes.append(f"🟠 CPA needs monitoring at ₹{health_cpa:.2f}.")
+            else:
+                health_notes.append(f"🟢 CPA is healthy at ₹{health_cpa:.2f}.")
+        else:
+            health_score -= 20
+            health_notes.append("🔴 No conversions recorded for the selected data.")
+
+        # Waste spend
+        if "waste_df" in locals() and not waste_df.empty:
+            waste_amount = float(waste_df["Cost (₹)"].sum())
+
+            waste_ratio = (
+                (waste_amount / health_cost) * 100
+                if health_cost > 0 else 0
+            )
+
+            if waste_ratio > 25:
+                health_score -= 20
+                health_notes.append(
+                    f"🔴 Waste spend is high at {waste_ratio:.1f}% of selected spend."
+                )
+            elif waste_ratio > 10:
+                health_score -= 10
+                health_notes.append(
+                    f"🟠 Waste spend is {waste_ratio:.1f}% of selected spend."
                 )
             else:
-                assistant_text = (
-                    f"No Search Terms data is available for "
-                    f"**{date_option}**. I cannot confirm "
-                    "negative keywords without actual Search Terms data, "
-                    "and I will not invent suggestions."
+                health_notes.append(
+                    f"🟢 Waste spend is under control at {waste_ratio:.1f}%."
+                )
+
+        health_score = max(0, min(100, health_score))
+
+        if health_score >= 80:
+            health_status = "🟢 Excellent"
+        elif health_score >= 60:
+            health_status = "🟡 Good"
+        elif health_score >= 40:
+            health_status = "🟠 Needs Attention"
+        else:
+            health_status = "🔴 Critical"
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric(
+                "Account Health Score",
+                f"{health_score}/100"
+            )
+
+        with col2:
+            st.metric(
+                "Health Status",
+                health_status
+            )
+
+        st.progress(health_score / 100)
+
+        for note in health_notes:
+            st.write(note)
+        # ==================================================
+        # WASTE RISK + BUDGET REALLOCATION INTELLIGENCE
+        # ==================================================
+
+        st.divider()
+        st.header("🚨 Waste Risk & Budget Intelligence")
+
+        selected_spend = (
+            float(filtered_df["Cost (₹)"].sum())
+            if "Cost (₹)" in filtered_df.columns
+            else 0
+        )
+
+        selected_conversions = (
+            float(filtered_df["Conversions"].sum())
+            if "Conversions" in filtered_df.columns
+            else 0
+        )
+
+        selected_cpa = (
+            selected_spend / selected_conversions
+            if selected_conversions > 0
+            else 0
+        )
+
+        waste_amount = 0.0
+
+        if "waste_df" in locals() and not waste_df.empty:
+            if "Cost (₹)" in waste_df.columns:
+                waste_amount = float(waste_df["Cost (₹)"].sum())
+
+        waste_ratio = (
+            (waste_amount / selected_spend) * 100
+            if selected_spend > 0
+            else 0
+        )
+
+        # -----------------------------
+        # WASTE RISK SCORE
+        # -----------------------------
+
+        if waste_ratio >= 30:
+            waste_risk_score = 90
+            waste_risk_status = "🔴 Critical"
+        elif waste_ratio >= 20:
+            waste_risk_score = 75
+            waste_risk_status = "🟠 High"
+        elif waste_ratio >= 10:
+            waste_risk_score = 50
+            waste_risk_status = "🟡 Moderate"
+        elif waste_ratio > 0:
+            waste_risk_score = 25
+            waste_risk_status = "🟢 Low"
+        else:
+            waste_risk_score = 0
+            waste_risk_status = "🟢 Very Low"
+
+        risk_col1, risk_col2, risk_col3 = st.columns(3)
+
+        with risk_col1:
+            st.metric(
+                "Waste Risk Score",
+                f"{waste_risk_score}/100"
+            )
+
+        with risk_col2:
+            st.metric(
+                "Waste Risk",
+                waste_risk_status
+            )
+
+        with risk_col3:
+            st.metric(
+                "Potential Waste Spend",
+                f"₹{waste_amount:,.2f}"
+            )
+
+        st.progress(waste_risk_score / 100)
+
+        st.write(
+            f"Potential waste represents **{waste_ratio:.1f}%** "
+            f"of selected spend."
+        )
+
+        # -----------------------------
+        # BUDGET INTELLIGENCE
+        # -----------------------------
+
+        st.subheader("💰 Budget Reallocation Suggestions")
+
+        budget_actions = []
+
+        # Critical / high waste = do NOT increase budget
+        if waste_ratio >= 20:
+            budget_actions.append(
+                "🔴 **Do not increase total budget yet.** "
+                "Waste spend is too high. Reduce irrelevant traffic first."
+            )
+
+            budget_actions.append(
+                "🚫 **Priority:** Review search terms and add negative keywords "
+                "before scaling any campaign."
+            )
+
+            if selected_cpa > 1500:
+                budget_actions.append(
+                    f"🟠 **CPA is high at ₹{selected_cpa:,.2f}.** "
+                    "Improve conversion efficiency before increasing spend."
+                )
+
+        elif waste_ratio >= 10:
+            budget_actions.append(
+                "🟡 **Hold major budget increases.** "
+                "Clean search terms and reduce waste first."
+            )
+
+        else:
+            # Only recommend scaling when waste is controlled
+            if not filtered_df.empty:
+                budget_df = filtered_df.copy()
+
+                if (
+                    "Cost (₹)" in budget_df.columns
+                    and "Conversions" in budget_df.columns
+                ):
+
+                    budget_df["AI CPA"] = budget_df.apply(
+                        lambda row:
+                            row["Cost (₹)"] / row["Conversions"]
+                            if row["Conversions"] > 0
+                            else float("inf"),
+                        axis=1
+                    )
+
+                    converting_df = budget_df[
+                        budget_df["Conversions"] > 0
+                    ].copy()
+
+                    if not converting_df.empty:
+                        best_campaign = converting_df.loc[
+                            converting_df["AI CPA"].idxmin()
+                        ]
+
+                        best_campaign_name = (
+                            best_campaign["Campaign"]
+                            if "Campaign" in converting_df.columns
+                            else "Best-performing campaign"
+                        )
+
+                        budget_actions.append(
+                            "🟢 **Increase carefully:** "
+                            f"{best_campaign_name} has the strongest CPA "
+                            f"at ₹{best_campaign['AI CPA']:,.2f}."
+                        )
+
+        # Zero-conversion spend check
+        if not filtered_df.empty:
+            if (
+                "Cost (₹)" in filtered_df.columns
+                and "Conversions" in filtered_df.columns
+            ):
+                zero_conversion_df = filtered_df[
+                    (filtered_df["Cost (₹)"] > 0)
+                    & (filtered_df["Conversions"] == 0)
+                ].copy()
+
+                if not zero_conversion_df.empty:
+                    highest_waste_campaign = zero_conversion_df.loc[
+                        zero_conversion_df["Cost (₹)"].idxmax()
+                    ]
+
+                    zero_campaign_name = (
+                        highest_waste_campaign["Campaign"]
+                        if "Campaign" in zero_conversion_df.columns
+                        else "Zero-conversion campaign"
+                    )
+
+                    budget_actions.append(
+                        "🔴 **Reduce or pause for review:** "
+                        f"{zero_campaign_name} spent "
+                        f"₹{highest_waste_campaign['Cost (₹)']:,.2f} "
+                        "with zero conversions."
+                    )
+
+        if not budget_actions:
+            budget_actions.append(
+                "🟢 Current budget distribution looks stable. "
+                "Continue monitoring CPA, conversion rate, and waste spend."
+            )
+
+        for i, action in enumerate(
+            budget_actions[:5],
+            start=1
+        ):
+            st.write(
+                f"**{i}. {action}**"
+            )
+
+        # -----------------------------
+        # TOP 5 ACTIONS NOW
+        # -----------------------------
+
+        st.subheader("🎯 Top 5 Actions Now")
+
+        top_actions = []
+
+        if waste_ratio >= 10:
+            top_actions.append(
+                "Review search terms and add negative keywords."
+            )
+
+        if selected_cpa > 1500:
+            top_actions.append(
+                "Reduce high-CPA traffic before increasing budget."
+            )
+
+        if "health_ctr" in locals() and health_ctr < 3:
+            top_actions.append(
+                "Improve ad copy and keyword relevance to raise CTR."
+            )
+
+        if "health_conversion_rate" in locals() and health_conversion_rate < 5:
+            top_actions.append(
+                "Improve landing page and lead conversion flow."
+            )
+
+        if selected_conversions > 0:
+            top_actions.append(
+                "Protect campaigns producing real conversions."
+            )
+
+        if not top_actions:
+            top_actions.append(
+                "Continue monitoring performance and scale gradually."
+            )
+
+        for i, action in enumerate(
+            top_actions[:5],
+            start=1
+        ):
+            st.write(
+                f"**{i}. {action}**"
+            )
+        # ==================================================
+        # BEFORE VS AFTER PERFORMANCE INTELLIGENCE
+        # ==================================================
+
+        st.divider()
+        st.header("📊 Before vs After Performance Intelligence")
+
+
+        def baf_numeric_series(data, possible_names):
+
+            for column_name in possible_names:
+
+                if column_name in data.columns:
+
+                    return pd.to_numeric(
+                        data[column_name],
+                        errors="coerce"
+                    ).fillna(0)
+
+            return pd.Series(
+                0.0,
+                index=data.index
+            )
+
+
+        def baf_summary(data):
+
+            impressions = float(
+                baf_numeric_series(
+                    data,
+                    ["Impressions"]
+                ).sum()
+            )
+
+            clicks = float(
+                baf_numeric_series(
+                    data,
+                    ["Clicks"]
+                ).sum()
+            )
+
+            cost = float(
+                baf_numeric_series(
+                    data,
+                    [
+                        "Cost",
+                        "Cost (₹)",
+                        "Spend",
+                        "Spend (₹)"
+                    ]
+                ).sum()
+            )
+
+            conversions = float(
+                baf_numeric_series(
+                    data,
+                    ["Conversions"]
+                ).sum()
+            )
+
+            ctr = (
+                clicks / impressions * 100
+                if impressions > 0
+                else 0
+            )
+
+            avg_cpc = (
+                cost / clicks
+                if clicks > 0
+                else 0
+            )
+
+            cpa = (
+                cost / conversions
+                if conversions > 0
+                else 0
+            )
+
+            conversion_rate = (
+                conversions / clicks * 100
+                if clicks > 0
+                else 0
+            )
+
+            return {
+                "Impressions": impressions,
+                "Clicks": clicks,
+                "Cost": cost,
+                "Conversions": conversions,
+                "CTR": ctr,
+                "Avg CPC": avg_cpc,
+                "CPA": cpa,
+                "Conversion Rate": conversion_rate
+            }
+
+
+        def baf_pct_change(before_value, after_value):
+
+            if before_value == 0:
+
+                if after_value == 0:
+                    return 0
+
+                return 100
+
+            return (
+                (after_value - before_value)
+                / before_value
+            ) * 100
+
+
+        if "daily_df" in locals() and not daily_df.empty:
+
+            compare_df = daily_df.copy()
+
+            if "Date" not in compare_df.columns:
+                compare_df = compare_df.reset_index()
+
+            if "Date" not in compare_df.columns:
+                compare_df = compare_df.rename(
+                    columns={
+                        compare_df.columns[0]: "Date"
+                    }
+                )
+
+            compare_df["Date"] = pd.to_datetime(
+                compare_df["Date"],
+                errors="coerce"
+            )
+
+            compare_df = (
+                compare_df
+                .dropna(subset=["Date"])
+                .sort_values("Date")
+                .reset_index(drop=True)
+            )
+
+            # ==============================================
+            # SELECTED PERIOD BOUNDARIES
+            # ==============================================
+
+            if date_option == "Last 30 Days":
+
+                period_end_date = pd.Timestamp(
+                    today - timedelta(days=1)
+                )
+
+                period_start_date = (
+                    period_end_date
+                    - pd.Timedelta(days=29)
+                )
+
+            elif date_option == "Custom Date Range":
+
+                period_start_date = pd.Timestamp(
+                    start_date
+                )
+
+                period_end_date = pd.Timestamp(
+                    end_date
+                )
+
+            else:
+
+                period_start_date = (
+                    compare_df["Date"]
+                    .min()
+                    .normalize()
+                )
+
+                period_end_date = (
+                    compare_df["Date"]
+                    .max()
+                    .normalize()
+                )
+
+            total_days = (
+                period_end_date
+                - period_start_date
+            ).days + 1
+
+            if total_days >= 2:
+
+                before_days = total_days // 2
+
+                before_start_date = period_start_date
+
+                before_end_date = (
+                    before_start_date
+                    + pd.Timedelta(
+                        days=before_days - 1
+                    )
+                )
+
+                after_start_date = (
+                    before_end_date
+                    + pd.Timedelta(days=1)
+                )
+
+                after_end_date = period_end_date
+
+                after_days = (
+                    after_end_date
+                    - after_start_date
+                ).days + 1
+
+                before_df = compare_df[
+                    (compare_df["Date"] >= before_start_date)
+                    &
+                    (compare_df["Date"] <= before_end_date)
+                ].copy()
+
+                after_df = compare_df[
+                    (compare_df["Date"] >= after_start_date)
+                    &
+                    (compare_df["Date"] <= after_end_date)
+                ].copy()
+
+                before_metrics = baf_summary(
+                    before_df
+                )
+
+                after_metrics = baf_summary(
+                    after_df
+                )
+
+                before_start_text = (
+                    before_start_date.strftime(
+                        "%d %b %Y"
+                    )
+                )
+
+                before_end_text = (
+                    before_end_date.strftime(
+                        "%d %b %Y"
+                    )
+                )
+
+                after_start_text = (
+                    after_start_date.strftime(
+                        "%d %b %Y"
+                    )
+                )
+
+                after_end_text = (
+                    after_end_date.strftime(
+                        "%d %b %Y"
+                    )
+                )
+
+                st.caption(
+                    f"📅 Before ({before_days} days): "
+                    f"{before_start_text} → {before_end_text} | "
+                    f"After ({after_days} days): "
+                    f"{after_start_text} → {after_end_text}"
+                )
+
+                # ==========================================
+                # CHANGES
+                # ==========================================
+
+                impressions_change = baf_pct_change(
+                    before_metrics["Impressions"],
+                    after_metrics["Impressions"]
+                )
+
+                clicks_change = baf_pct_change(
+                    before_metrics["Clicks"],
+                    after_metrics["Clicks"]
+                )
+
+                cost_change = baf_pct_change(
+                    before_metrics["Cost"],
+                    after_metrics["Cost"]
+                )
+
+                conversions_change = baf_pct_change(
+                    before_metrics["Conversions"],
+                    after_metrics["Conversions"]
+                )
+
+                ctr_change = baf_pct_change(
+                    before_metrics["CTR"],
+                    after_metrics["CTR"]
+                )
+
+                cpc_change = baf_pct_change(
+                    before_metrics["Avg CPC"],
+                    after_metrics["Avg CPC"]
+                )
+
+                cpa_change = baf_pct_change(
+                    before_metrics["CPA"],
+                    after_metrics["CPA"]
+                )
+
+                conversion_rate_change = baf_pct_change(
+                    before_metrics["Conversion Rate"],
+                    after_metrics["Conversion Rate"]
+                )
+
+                comparison_table = pd.DataFrame({
+
+                    "Metric": [
+                        "Impressions",
+                        "Clicks",
+                        "Cost (₹)",
+                        "Conversions",
+                        "CTR (%)",
+                        "Avg CPC (₹)",
+                        "CPA (₹)",
+                        "Conversion Rate (%)"
+                    ],
+
+                    "Before": [
+                        f"{before_metrics['Impressions']:,.0f}",
+                        f"{before_metrics['Clicks']:,.0f}",
+                        f"₹{before_metrics['Cost']:,.2f}",
+                        f"{before_metrics['Conversions']:,.2f}",
+                        f"{before_metrics['CTR']:.2f}%",
+                        f"₹{before_metrics['Avg CPC']:,.2f}",
+                        f"₹{before_metrics['CPA']:,.2f}",
+                        f"{before_metrics['Conversion Rate']:.2f}%"
+                    ],
+
+                    "After": [
+                        f"{after_metrics['Impressions']:,.0f}",
+                        f"{after_metrics['Clicks']:,.0f}",
+                        f"₹{after_metrics['Cost']:,.2f}",
+                        f"{after_metrics['Conversions']:,.2f}",
+                        f"{after_metrics['CTR']:.2f}%",
+                        f"₹{after_metrics['Avg CPC']:,.2f}",
+                        f"₹{after_metrics['CPA']:,.2f}",
+                        f"{after_metrics['Conversion Rate']:.2f}%"
+                    ],
+
+                    "Change": [
+                        f"{impressions_change:+.1f}%",
+                        f"{clicks_change:+.1f}%",
+                        f"{cost_change:+.1f}%",
+                        f"{conversions_change:+.1f}%",
+                        f"{ctr_change:+.1f}%",
+                        f"{cpc_change:+.1f}%",
+                        f"{cpa_change:+.1f}%",
+                        f"{conversion_rate_change:+.1f}%"
+                    ]
+                })
+
+                st.dataframe(
+                    comparison_table,
+                    width="stretch",
+                    hide_index=True
+                )
+
+                # ==========================================
+                # BALANCED PERFORMANCE SCORE
+                # ==========================================
+
+                intelligence_score = 50
+                intelligence_notes = []
+
+                # Conversions
+                if conversions_change >= 20:
+
+                    intelligence_score += 20
+
+                    intelligence_notes.append(
+                        f"🟢 Conversions improved strongly by "
+                        f"{conversions_change:.1f}%."
+                    )
+
+                elif conversions_change >= 10:
+
+                    intelligence_score += 15
+
+                    intelligence_notes.append(
+                        f"🟢 Conversions improved by "
+                        f"{conversions_change:.1f}%."
+                    )
+
+                elif conversions_change <= -20:
+
+                    intelligence_score -= 20
+
+                    intelligence_notes.append(
+                        f"🔴 Conversions declined strongly by "
+                        f"{abs(conversions_change):.1f}%."
+                    )
+
+                elif conversions_change <= -10:
+
+                    intelligence_score -= 15
+
+                    intelligence_notes.append(
+                        f"🔴 Conversions declined by "
+                        f"{abs(conversions_change):.1f}%."
+                    )
+
+                # CPA
+                if cpa_change <= -10:
+
+                    intelligence_score += 15
+
+                    intelligence_notes.append(
+                        f"🟢 CPA improved by "
+                        f"{abs(cpa_change):.1f}%."
+                    )
+
+                elif cpa_change >= 25:
+
+                    intelligence_score -= 15
+
+                    intelligence_notes.append(
+                        f"🔴 CPA increased significantly by "
+                        f"{cpa_change:.1f}%."
+                    )
+
+                elif cpa_change >= 10:
+
+                    intelligence_score -= 10
+
+                    intelligence_notes.append(
+                        f"🟠 CPA increased by "
+                        f"{cpa_change:.1f}%."
+                    )
+
+                # CTR
+                if ctr_change >= 10:
+
+                    intelligence_score += 10
+
+                    intelligence_notes.append(
+                        f"🟢 CTR improved by "
+                        f"{ctr_change:.1f}%."
+                    )
+
+                elif ctr_change <= -20:
+
+                    intelligence_score -= 10
+
+                    intelligence_notes.append(
+                        f"🔴 CTR declined significantly by "
+                        f"{abs(ctr_change):.1f}%."
+                    )
+
+                elif ctr_change <= -10:
+
+                    intelligence_score -= 5
+
+                    intelligence_notes.append(
+                        f"🟠 CTR declined by "
+                        f"{abs(ctr_change):.1f}%."
+                    )
+
+                # Conversion Rate
+                if conversion_rate_change >= 10:
+
+                    intelligence_score += 10
+
+                    intelligence_notes.append(
+                        f"🟢 Conversion Rate improved by "
+                        f"{conversion_rate_change:.1f}%."
+                    )
+
+                elif conversion_rate_change <= -15:
+
+                    intelligence_score -= 10
+
+                    intelligence_notes.append(
+                        f"🔴 Conversion Rate declined by "
+                        f"{abs(conversion_rate_change):.1f}%."
+                    )
+
+                elif conversion_rate_change <= -5:
+
+                    intelligence_score -= 5
+
+                    intelligence_notes.append(
+                        f"🟠 Conversion Rate declined by "
+                        f"{abs(conversion_rate_change):.1f}%."
+                    )
+
+                intelligence_score = max(
+                    0,
+                    min(
+                        100,
+                        intelligence_score
+                    )
+                )
+
+                # ==========================================
+                # STATUS
+                # ==========================================
+
+                if intelligence_score >= 75:
+
+                    intelligence_status = (
+                        "🟢 Strong Improvement"
+                    )
+
+                elif intelligence_score >= 55:
+
+                    intelligence_status = (
+                        "🟡 Stable / Improving"
+                    )
+
+                elif intelligence_score >= 35:
+
+                    intelligence_status = (
+                        "🟠 Needs Attention"
+                    )
+
+                else:
+
+                    intelligence_status = (
+                        "🔴 Performance Declining"
+                    )
+
+                score_col1, score_col2 = st.columns(2)
+
+                with score_col1:
+
+                    st.metric(
+                        "Performance Intelligence Score",
+                        f"{intelligence_score}/100"
+                    )
+
+                with score_col2:
+
+                    st.metric(
+                        "Performance Trend",
+                        intelligence_status
+                    )
+
+                st.progress(
+                    intelligence_score / 100
+                )
+
+                # ==========================================
+                # INTERPRETATION
+                # ==========================================
+
+                st.subheader(
+                    "🧠 Performance Interpretation"
+                )
+
+                if intelligence_notes:
+
+                    for note in intelligence_notes:
+                        st.write(note)
+
+                else:
+
+                    st.write(
+                        "🟡 Performance is relatively stable "
+                        "between both periods."
+                    )
+
+                # ==========================================
+                # RECOMMENDATION - MATCH SCORE
+                # ==========================================
+
+                st.subheader(
+                    "🎯 Recommended Next Move"
+                )
+
+                if intelligence_score >= 75:
+
+                    st.success(
+                        "Overall performance improved strongly. "
+                        "Protect winning campaigns and increase "
+                        "budget gradually while monitoring CPA."
+                    )
+
+                elif intelligence_score >= 55:
+
+                    st.info(
+                        "Performance is generally stable or improving. "
+                        "Continue optimizing search terms and scale "
+                        "only campaigns with healthy CPA."
+                    )
+
+                elif intelligence_score >= 35:
+
+                    st.warning(
+                        "Performance is mixed and needs attention. "
+                        "Conversions may be improving, but efficiency "
+                        "metrics such as CTR, CPA or Conversion Rate "
+                        "need optimization before major budget increases."
+                    )
+
+                else:
+
+                    st.error(
+                        "Overall performance is declining. "
+                        "Reduce waste, review search terms, bids, "
+                        "ad relevance and landing-page quality "
+                        "before increasing budget."
+                    )
+
+            else:
+
+                st.info(
+                    "At least 2 days of data are required "
+                    "for Before vs After comparison."
                 )
 
         else:
 
-            # ==================================================
-            # AI PROMPT
-            # ==================================================
-
-            prompt = f"""
-You are a professional Google Ads AI analyst.
-
-IMPORTANT LANGUAGE RULES:
-- Detect the language used in the user's question.
-- If the question is in Telugu, answer in Telugu.
-- If the question is in English, answer in English.
-- If the user mixes Telugu and English, reply naturally in the same style.
-- Keep Google Ads technical terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
-
-IMPORTANT DATA RULES:
-- Use ONLY the Google Ads data supplied below.
-- Never invent metrics.
-- Never invent Search Terms.
-- Never invent negative keywords.
-- The selected date range is the authoritative period for the supplied data.
-- Answer only for that period.
-- Do not present campaign-vs-account performance as Before vs After.
-- Use BEFORE VS AFTER DATA only when actual comparison data is available.
-
-ADVERTISER SERVICES:
-- Home Care
-- Patient Care
-- Elderly Care
-- Nursing Care
-- Baby Care
-- Babysitter
-- Nanny
-- Caretaker
-- Caregiver
-
-NEGATIVE KEYWORD RULES:
-- Use ONLY actual terms from SEARCH TERMS DATA.
-- Zero conversions alone is NOT enough reason to make a term negative.
-- Never classify a Search Term with Conversions greater than 0 as ADD AS NEGATIVE.
-- Never recommend an offered service category as an account-level negative.
-- Caretaker agency, caregiver agency and similar service-provider intent are relevant.
-- ICU care at home, dressing nurse, bedside care and medical support at home must be REVIEW or MOVE TO CORRECT CAMPAIGN unless clearly irrelevant.
-- Baby Care, Babysitter or Nanny intent in a non-Baby-Care campaign = MOVE TO CORRECT CAMPAIGN.
-- Nursing Care intent in a non-Nursing-Care campaign = MOVE TO CORRECT CAMPAIGN.
-- Patient Care intent in a non-Patient-Care campaign = MOVE TO CORRECT CAMPAIGN.
-- Elderly Care intent in a non-Elderly-Care campaign = MOVE TO CORRECT CAMPAIGN.
-- Search Terms targeting a city outside the intended location = REVIEW - GEO MISMATCH.
-- Relevant high-intent terms = KEEP.
-- Uncertain terms = REVIEW.
-- ADD AS NEGATIVE only when intent is clearly outside ALL advertiser services.
-- Never show the same Search Term more than once.
-- Duplicate Search Terms have been combined where possible.
-- A Search Term can appear in only ONE final category.
-- Doctor-at-home / doctor visit intent is outside the advertiser's listed services and may be ADD AS NEGATIVE when clearly doctor-service intent.
-- Old-age-home / residential facility intent is different from Elderly Care at Home and may be ADD AS NEGATIVE when clearly facility intent.
-
-Classification priority:
-1. KEEP if relevant and converted
-2. MOVE TO CORRECT CAMPAIGN if it belongs to another offered service
-3. REVIEW if uncertain or geo mismatch
-4. ADD AS NEGATIVE only if clearly irrelevant
-
-For negative keyword analysis return exactly:
-1. ADD AS NEGATIVE
-2. MOVE TO CORRECT CAMPAIGN
-3. REVIEW
-4. KEEP
-
-RESPONSE STYLE:
-- Answer the user's exact question first.
-- Be practical and concise.
-- Use ₹ for money.
-- Use clear markdown tables where useful.
-- Highlight CTR, CPC, CPA, Cost and Conversions where relevant.
-- Explain problems clearly.
-- Finish with 3 priority actions.
-- Show the 4-section negative keyword analysis ONLY when the USER QUESTION specifically asks about negative keywords or search-term classification.
-- For general performance questions, do NOT include ADD AS NEGATIVE / MOVE TO CORRECT CAMPAIGN / REVIEW / KEEP sections.
-- For general performance questions, focus on Overall Performance, Campaign Performance, Key Problems, Opportunities and 3 Priority Actions.
-
-SELECTED DATE RANGE:
-{date_option}
-
-DATE FILTER:
-{date_filter_clause}
-
-CAMPAIGN DATA:
-{filtered_df.to_string(index=False)}
-
-SEARCH TERMS DATA:
-{search_terms_context}
-
-BEFORE VS AFTER DATA:
-{before_after_context}
-
-OVERALL METRICS:
-Impressions: {total_impressions}
-Clicks: {total_clicks}
-Cost: ₹{total_cost:.2f}
-Conversions: {total_conversions:.2f}
-CTR: {overall_ctr:.2f}%
-Average CPC: ₹{overall_cpc:.2f}
-CPA: ₹{overall_cpa:.2f}
-Conversion Rate: {overall_conversion_rate:.2f}%
-
-USER QUESTION:
-{question}
-
-Answer the USER QUESTION using only the supplied data.
-"""
-
-            # ==================================================
-            # OPENAI
-            # ==================================================
-
-            with st.spinner("AI is analyzing..."):
-
-                ai_response = openai_client.responses.create(
-                    model="gpt-5.4-mini",
-                    input=prompt
-                )
-
-            assistant_text = ai_response.output_text
-
+            st.info(
+                "Daily performance data is not available."
+            )    
         # ==================================================
-        # SAVE RESPONSE
+        # ASK AI
         # ==================================================
 
-        st.session_state.ai_chat_history.append(
-            {
-                "role": "assistant",
-                "content": assistant_text
-            }
+        st.divider()
+        st.header("🤖 Ask AI About Your Campaign")
+
+        # ==================================================
+        # CHAT HISTORY
+        # ==================================================
+
+        if "ai_chat_history" not in st.session_state:
+            st.session_state.ai_chat_history = []
+
+        if date_option == "Custom Date Range":
+            current_ai_period = (
+                f"{date_option}:"
+                f"{start_date:%Y-%m-%d}:"
+                f"{end_date:%Y-%m-%d}"
+            )
+        else:
+            current_ai_period = date_option
+
+        if "ai_chat_period" not in st.session_state:
+            st.session_state.ai_chat_period = current_ai_period
+
+        elif st.session_state.ai_chat_period != current_ai_period:
+            st.session_state.ai_chat_history = []
+            st.session_state.ai_chat_period = current_ai_period
+
+        if st.button(
+            "🗑️ Clear AI Chat",
+            key="clear_ai_chat_button"
+        ):
+            st.session_state.ai_chat_history = []
+            st.rerun()
+
+        for message in st.session_state.ai_chat_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # ==================================================
+        # QUESTION BOX
+        # ==================================================
+
+        question = st.text_input(
+            "Ask a question about your campaigns",
+            placeholder="Example: గత 30 రోజుల్లో performance ఎలా ఉంది?",
+            key="ask_ai_question"
         )
 
+        pending_ai_question = st.session_state.pop(
+            "pending_ai_question",
+            None
+        )
+
+        analyze_clicked = st.button(
+            "Analyze with AI",
+            key="ask_ai_analyze_button"
+        )
+
+        if pending_ai_question:
+            question = pending_ai_question
+
         # ==================================================
-        # SHOW CURRENT ANSWER
+        # ANALYZE
         # ==================================================
 
-        st.markdown("### 🤖 Google Ads AI")
+        if analyze_clicked or pending_ai_question:
 
-        with st.chat_message("user"):
-            st.markdown(question)
+            if question and question.strip():
 
-        with st.chat_message("assistant"):
-            st.markdown(assistant_text)
+                question = question.strip()
+                question_lower = question.lower()
 
-    else:
-        st.warning("Please enter a question.")
+                # ==================================================
+                # DETECT DATE RANGE
+                # ==================================================
+
+                requested_date_option = None
+
+                if any(
+                    phrase in question_lower
+                    for phrase in [
+                        "today",
+                        "ఈ రోజు",
+                        "ఈరోజు"
+                    ]
+                ):
+                    requested_date_option = "Today"
+
+                elif any(
+                    phrase in question_lower
+                    for phrase in [
+                        "last 7 days",
+                        "గత 7 రోజులు",
+                        "గత 7 రోజుల్లో",
+                        "7 days"
+                    ]
+                ):
+                    requested_date_option = "Last 7 Days"
+
+                elif any(
+                    phrase in question_lower
+                    for phrase in [
+                        "last 30 days",
+                        "గత 30 రోజులు",
+                        "గత 30 రోజుల్లో",
+                        "30 days"
+                    ]
+                ):
+                    requested_date_option = "Last 30 Days"
+
+                elif any(
+                    phrase in question_lower
+                    for phrase in [
+                        "last 90 days",
+                        "గత 90 రోజులు",
+                        "గత 90 రోజుల్లో",
+                        "90 days"
+                    ]
+                ):
+                    requested_date_option = "Last 90 Days"
+
+                elif any(
+                    phrase in question_lower
+                    for phrase in [
+                        "last 6 months",
+                        "గత 6 నెలలు",
+                        "గత 6 నెలల్లో",
+                        "6 months"
+                    ]
+                ):
+                    requested_date_option = "Last 6 Months"
+
+                elif any(
+                    phrase in question_lower
+                    for phrase in [
+                        "last 1 year",
+                        "last year",
+                        "గత 1 సంవత్సరం",
+                        "గత సంవత్సరం",
+                        "1 year"
+                    ]
+                ):
+                    requested_date_option = "Last 1 Year"
+
+                # ==================================================
+                # AUTO DATE CHANGE + SAME QUESTION
+                # ==================================================
+
+                if (
+                    requested_date_option
+                    and requested_date_option != date_option
+                ):
+                    st.session_state.pending_ai_date_option = (
+                        requested_date_option
+                    )
+
+                    st.session_state.pending_ai_question = question
+                    st.session_state.ai_chat_history = []
+
+                    st.rerun()
+
+                # Save user message only after correct date data loads
+                st.session_state.ai_chat_history.append(
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                )
+
+                # ==================================================
+                # SEARCH TERMS CONTEXT
+                # ==================================================
+
+                if "search_df" in locals() and not search_df.empty:
+
+                    search_terms_for_ai = search_df.copy()
+
+                    required_columns = {
+                        "Search Term",
+                        "Campaign",
+                        "Clicks",
+                        "Cost (₹)",
+                        "Conversions"
+                    }
+
+                    if required_columns.issubset(
+                        search_terms_for_ai.columns
+                    ):
+                        search_terms_for_ai = (
+                            search_terms_for_ai
+                            .groupby(
+                                ["Search Term", "Campaign"],
+                                as_index=False
+                            )
+                            .agg(
+                                {
+                                    "Clicks": "sum",
+                                    "Cost (₹)": "sum",
+                                    "Conversions": "sum"
+                                }
+                            )
+                            .sort_values(
+                                "Cost (₹)",
+                                ascending=False
+                            )
+                            .head(100)
+                        )
+
+                    else:
+                        search_terms_for_ai = (
+                            search_terms_for_ai.head(100)
+                        )
+
+                    search_terms_context = (
+                        search_terms_for_ai.to_string(
+                            index=False
+                        )
+                    )
+
+                    search_terms_available = True
+
+                else:
+                    search_terms_context = (
+                        "No Search Terms data is available "
+                        "for the selected date range."
+                    )
+
+                    search_terms_available = False
+
+                # ==================================================
+                # BEFORE VS AFTER CONTEXT
+                # ==================================================
+
+                if (
+                    "comparison_data" in locals()
+                    and not comparison_data.empty
+                ):
+                    before_after_context = (
+                        comparison_data.to_string(index=False)
+                    )
+                else:
+                    before_after_context = (
+                        "No Before vs After comparison data is available."
+                    )
+
+                # ==================================================
+                # NEGATIVE KEYWORD QUESTION
+                # ==================================================
+
+                negative_keyword_question = any(
+                    phrase in question_lower
+                    for phrase in [
+                        "negative keyword",
+                        "negative keywords",
+                        "నెగటివ్",
+                        "నెగెటివ్"
+                    ]
+                )
+
+                if (
+                    negative_keyword_question
+                    and not search_terms_available
+                ):
+
+                    telugu_question = any(
+                        "\u0c00" <= char <= "\u0c7f"
+                        for char in question
+                    )
+
+                    if telugu_question:
+                        assistant_text = (
+                            f"Selected date range **{date_option}** లో "
+                            "Search Terms data అందుబాటులో లేదు. "
+                            "కాబట్టి actual Search Terms ఆధారంగా "
+                            "negative keywords‌ను confirm చేయలేను. "
+                            "నేను ఊహించి negative keywords suggest చేయను."
+                        )
+                    else:
+                        assistant_text = (
+                            f"No Search Terms data is available for "
+                            f"**{date_option}**. I cannot confirm "
+                            "negative keywords without actual Search Terms data, "
+                            "and I will not invent suggestions."
+                        )
+
+                else:
+
+                    # ==================================================
+                    # AI PROMPT
+                    # ==================================================
+
+                    prompt = f"""
+        You are a professional Google Ads AI analyst.
+
+        IMPORTANT LANGUAGE RULES:
+        - Detect the language used in the user's question.
+        - If the question is in Telugu, answer in Telugu.
+        - If the question is in English, answer in English.
+        - If the user mixes Telugu and English, reply naturally in the same style.
+        - Keep Google Ads technical terms such as CTR, CPC, CPA, Keywords and Conversions in English when useful.
+
+        IMPORTANT DATA RULES:
+        - Use ONLY the Google Ads data supplied below.
+        - Never invent metrics.
+        - Never invent Search Terms.
+        - Never invent negative keywords.
+        - The selected date range is the authoritative period for the supplied data.
+        - Answer only for that period.
+        - Do not present campaign-vs-account performance as Before vs After.
+        - Use BEFORE VS AFTER DATA only when actual comparison data is available.
+
+        ADVERTISER SERVICES:
+        - Home Care
+        - Patient Care
+        - Elderly Care
+        - Nursing Care
+        - Baby Care
+        - Babysitter
+        - Nanny
+        - Caretaker
+        - Caregiver
+
+        NEGATIVE KEYWORD RULES:
+        - Use ONLY actual terms from SEARCH TERMS DATA.
+        - Zero conversions alone is NOT enough reason to make a term negative.
+        - Never classify a Search Term with Conversions greater than 0 as ADD AS NEGATIVE.
+        - Never recommend an offered service category as an account-level negative.
+        - Caretaker agency, caregiver agency and similar service-provider intent are relevant.
+        - ICU care at home, dressing nurse, bedside care and medical support at home must be REVIEW or MOVE TO CORRECT CAMPAIGN unless clearly irrelevant.
+        - Baby Care, Babysitter or Nanny intent in a non-Baby-Care campaign = MOVE TO CORRECT CAMPAIGN.
+        - Nursing Care intent in a non-Nursing-Care campaign = MOVE TO CORRECT CAMPAIGN.
+        - Patient Care intent in a non-Patient-Care campaign = MOVE TO CORRECT CAMPAIGN.
+        - Elderly Care intent in a non-Elderly-Care campaign = MOVE TO CORRECT CAMPAIGN.
+        - Search Terms targeting a city outside the intended location = REVIEW - GEO MISMATCH.
+        - Relevant high-intent terms = KEEP.
+        - Uncertain terms = REVIEW.
+        - ADD AS NEGATIVE only when intent is clearly outside ALL advertiser services.
+        - Never show the same Search Term more than once.
+        - Duplicate Search Terms have been combined where possible.
+        - A Search Term can appear in only ONE final category.
+        - Doctor-at-home / doctor visit intent is outside the advertiser's listed services and may be ADD AS NEGATIVE when clearly doctor-service intent.
+        - Old-age-home / residential facility intent is different from Elderly Care at Home and may be ADD AS NEGATIVE when clearly facility intent.
+
+        Classification priority:
+        1. KEEP if relevant and converted
+        2. MOVE TO CORRECT CAMPAIGN if it belongs to another offered service
+        3. REVIEW if uncertain or geo mismatch
+        4. ADD AS NEGATIVE only if clearly irrelevant
+
+        For negative keyword analysis return exactly:
+        1. ADD AS NEGATIVE
+        2. MOVE TO CORRECT CAMPAIGN
+        3. REVIEW
+        4. KEEP
+
+        RESPONSE STYLE:
+        - Answer the user's exact question first.
+        - Be practical and concise.
+        - Use ₹ for money.
+        - Use clear markdown tables where useful.
+        - Highlight CTR, CPC, CPA, Cost and Conversions where relevant.
+        - Explain problems clearly.
+        - Finish with 3 priority actions.
+        - Show the 4-section negative keyword analysis ONLY when the USER QUESTION specifically asks about negative keywords or search-term classification.
+        - For general performance questions, do NOT include ADD AS NEGATIVE / MOVE TO CORRECT CAMPAIGN / REVIEW / KEEP sections.
+        - For general performance questions, focus on Overall Performance, Campaign Performance, Key Problems, Opportunities and 3 Priority Actions.
+
+        SELECTED DATE RANGE:
+        {date_option}
+
+        DATE FILTER:
+        {date_filter_clause}
+
+        CAMPAIGN DATA:
+        {filtered_df.to_string(index=False)}
+
+        SEARCH TERMS DATA:
+        {search_terms_context}
+
+        BEFORE VS AFTER DATA:
+        {before_after_context}
+
+        OVERALL METRICS:
+        Impressions: {total_impressions}
+        Clicks: {total_clicks}
+        Cost: ₹{total_cost:.2f}
+        Conversions: {total_conversions:.2f}
+        CTR: {overall_ctr:.2f}%
+        Average CPC: ₹{overall_cpc:.2f}
+        CPA: ₹{overall_cpa:.2f}
+        Conversion Rate: {overall_conversion_rate:.2f}%
+
+        USER QUESTION:
+        {question}
+
+        Answer the USER QUESTION using only the supplied data.
+        """
+
+                    # ==================================================
+                    # OPENAI
+                    # ==================================================
+
+                    with st.spinner("AI is analyzing..."):
+
+                        ai_response = openai_client.responses.create(
+                            model="gpt-5.4-mini",
+                            input=prompt
+                        )
+
+                    assistant_text = ai_response.output_text
+
+                # ==================================================
+                # SAVE RESPONSE
+                # ==================================================
+
+                st.session_state.ai_chat_history.append(
+                    {
+                        "role": "assistant",
+                        "content": assistant_text
+                    }
+                )
+
+                # ==================================================
+                # SHOW CURRENT ANSWER
+                # ==================================================
+
+                st.markdown("### 🤖 Google Ads AI")
+
+                with st.chat_message("user"):
+                    st.markdown(question)
+
+                with st.chat_message("assistant"):
+                    st.markdown(assistant_text)
+
+            else:
+                st.warning("Please enter a question.")
+
+except Exception as e:
+    st.error(f"Dashboard Error: {e}")
