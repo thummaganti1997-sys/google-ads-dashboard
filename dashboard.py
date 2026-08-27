@@ -644,7 +644,7 @@ try:
             ].copy()
 
 
-        # ==================================================
+                # ==================================================
         # CAMPAIGN PERFORMANCE
         # ==================================================
 
@@ -657,26 +657,68 @@ try:
 
         st.divider()
 
-                # ==================================================
+
+        # ==================================================
         # CAMPAIGN COMPARISON
         # ==================================================
 
         st.header("📈 Campaign Comparison")
 
-        st.subheader("Conversions by Campaign")
+        chart_col1, chart_col2 = st.columns(2)
 
-        conversion_chart = filtered_df[
-            ["Campaign", "Conversions"]
-        ].set_index("Campaign")
+        with chart_col1:
 
-        st.bar_chart(
-            conversion_chart,
-            width="stretch"
-        )
+            st.subheader("Clicks by Campaign")
 
-        # ==================================================
-        # SEARCH TERMS QUERY
-        # ==================================================
+            click_chart = filtered_df[
+                ["Campaign", "Clicks"]
+            ].set_index("Campaign")
+
+            st.bar_chart(
+                click_chart,
+                use_container_width=True
+            )
+
+            st.subheader("Conversions by Campaign")
+
+            conversion_chart = filtered_df[
+                ["Campaign", "Conversions"]
+            ].set_index("Campaign")
+
+            st.bar_chart(
+                conversion_chart,
+                use_container_width=True
+            )
+
+
+        with chart_col2:
+
+            st.subheader("Cost by Campaign")
+
+            cost_chart = filtered_df[
+                ["Campaign", "Cost (₹)"]
+            ].set_index("Campaign")
+
+            st.bar_chart(
+                cost_chart,
+                use_container_width=True
+            )
+
+            st.subheader("Clicks vs Conversions")
+
+            comparison_chart = filtered_df[
+                [
+                    "Campaign",
+                    "Clicks",
+                    "Conversions"
+                ]
+            ].set_index("Campaign")
+
+            st.bar_chart(
+                comparison_chart,
+                use_container_width=True
+            )
+
 
         search_query = f"""
             SELECT
@@ -687,93 +729,14 @@ try:
                 metrics.cost_micros,
                 metrics.conversions
             FROM search_term_view
-            WHERE {date_filter_clause}
+           WHERE {date_filter_clause}
             ORDER BY metrics.cost_micros DESC
             LIMIT 100
         """
 
-                      search_response = ga_service.search(
+        search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
-        )
-
-    except Exception as e:
-        st.error(f"Campaign/Search Terms Error: {e}")
-
-    st.divider()
-st.header("🔍 Search Terms Analysis")
-
-try:
-
-    search_query = f"""
-        SELECT
-            search_term_view.search_term,
-            campaign.name,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.cost_micros,
-            metrics.conversions
-        FROM search_term_view
-       WHERE {date_filter_clause}
-        ORDER BY metrics.cost_micros DESC
-        LIMIT 100
-    """
-
-    search_response = ga_service.search(
-        customer_id=customer_id,
-        query=search_query
-    )
-
-    search_data = []
-
-    for row in search_response:
-
-        impressions = int(row.metrics.impressions or 0)
-        clicks = int(row.metrics.clicks or 0)
-
-        cost = (
-            float(row.metrics.cost_micros or 0)
-            / 1_000_000
-        )
-
-        conversions = float(
-            row.metrics.conversions or 0
-        )
-
-        search_data.append({
-            "Search Term": row.search_term_view.search_term,
-            "Campaign": row.campaign.name,
-            "Impressions": impressions,
-            "Clicks": clicks,
-            "Cost (₹)": round(cost, 2),
-            "Conversions": round(conversions, 2)
-        })
-
-    if search_data:
-
-        search_df = pd.DataFrame(search_data)
-
-        st.dataframe(
-            search_df,
-            use_container_width=True
-        )
-
-    else:
-
-        search_df = pd.DataFrame()
-
-        st.info(
-            "No search terms found for the selected date range."
-        )
-
-except Exception as e:
-
-    search_df = pd.DataFrame()
-
-    st.error(
-        f"Search Terms Error: {e}"
-    )
-
 
 # ==================================================
 # POTENTIAL WASTE SPEND
