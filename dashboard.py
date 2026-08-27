@@ -692,12 +692,17 @@ try:
             LIMIT 100
         """
 
-        search_response = ga_service.search(
+               search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
         )
 
-st.divider()
+    except Exception as e:
+        st.error(
+            f"Campaign/Search Terms Error: {e}"
+        )
+
+    st.divider()
 
 st.header("🔍 Search Terms Analysis")
 
