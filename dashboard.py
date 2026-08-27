@@ -1712,11 +1712,22 @@ Keep the answer concise and do not invent data.
             )
 
         # ==================================================
-        # AI PRIORITY ACTION CENTER
+        # AI DAILY ACTION CENTER
+        # TOKEN-EFFICIENT VERSION
         # ==================================================
 
         st.divider()
-        st.header("🎯 AI Priority Action Center")
+        st.header("🎯 AI Daily Action Center")
+
+        st.caption(
+            "Shows immediate priority signals from the selected data and, "
+            "only when you click the AI button, sends a small Top-10 context "
+            "to OpenAI for the Top 5 practical actions."
+        )
+
+        # --------------------------------------------------
+        # INSTANT PRIORITY SIGNALS — NO OPENAI CALL
+        # --------------------------------------------------
 
         priority_actions = []
 
@@ -1727,7 +1738,7 @@ Keep the answer concise and do not invent data.
                 "Priority": "🔴 HIGH",
                 "Area": "CPA",
                 "Problem": f"CPA is high at ₹{overall_cpa:,.2f}",
-                "Action": "Reduce waste spend and focus budget on converting campaigns."
+                "Action": "Reduce waste spend and focus on converting traffic."
             })
 
 
@@ -1747,7 +1758,7 @@ Keep the answer concise and do not invent data.
                 "Priority": "🟠 MEDIUM",
                 "Area": "Conversion Rate",
                 "Problem": f"Conversion rate is only {overall_conversion_rate:.2f}%",
-                "Action": "Improve landing page relevance and focus on high-intent keywords."
+                "Action": "Focus on high-intent traffic and landing-page relevance."
             })
 
 
@@ -1758,22 +1769,27 @@ Keep the answer concise and do not invent data.
                 "Priority": "🟠 MEDIUM",
                 "Area": "CPC",
                 "Problem": f"Average CPC is ₹{overall_cpc:.2f}",
-                "Action": "Review expensive keywords, match types and search terms."
+                "Action": "Review expensive search terms, keywords and match types."
             })
 
 
         # WASTE SPEND
+        daily_waste_amount = 0.0
+
         if "waste_df" in locals() and not waste_df.empty:
 
-            waste_amount = waste_df["Cost (₹)"].sum()
+            if "Cost (₹)" in waste_df.columns:
+                daily_waste_amount = float(
+                    waste_df["Cost (₹)"].sum()
+                )
 
-            if waste_amount > 500:
+            if daily_waste_amount > 500:
 
                 priority_actions.append({
                     "Priority": "🔴 HIGH",
                     "Area": "Waste Spend",
-                    "Problem": f"₹{waste_amount:,.2f} spent with zero conversions.",
-                    "Action": "Review these search terms and add irrelevant terms as negatives."
+                    "Problem": f"₹{daily_waste_amount:,.2f} spent with zero conversions.",
+                    "Action": "Review high-spend zero-conversion terms before adding safe negatives."
                 })
 
 
@@ -1784,7 +1800,7 @@ Keep the answer concise and do not invent data.
                 "Priority": "🟢 GOOD",
                 "Area": "CTR",
                 "Problem": f"CTR is strong at {overall_ctr:.2f}%",
-                "Action": "Keep strong ads running and focus on conversion quality."
+                "Action": "Protect strong ad relevance and focus next on lead quality."
             })
 
 
@@ -1811,6 +1827,8 @@ Keep the answer concise and do not invent data.
                 .drop(columns=["Order"])
             )
 
+            st.subheader("⚡ Immediate Priority Signals")
+
             st.dataframe(
                 priority_df,
                 width="stretch",
@@ -1819,10 +1837,254 @@ Keep the answer concise and do not invent data.
 
         else:
 
-            st.success(
-                "🟢 No major actions required right now."
+            priority_df = pd.DataFrame(
+                columns=[
+                    "Priority",
+                    "Area",
+                    "Problem",
+                    "Action"
+                ]
             )
-         
+
+            st.success(
+                "🟢 No major rule-based warning is visible right now."
+            )
+
+
+        # --------------------------------------------------
+        # BUILD SMALL AI CONTEXT
+        # --------------------------------------------------
+
+        daily_campaign_context = "No campaign data available."
+
+        if "filtered_df" in locals() and not filtered_df.empty:
+
+            daily_campaign_columns = [
+                col
+                for col in [
+                    "Campaign",
+                    "Cost (₹)",
+                    "Conversions",
+                    "CPA (₹)"
+                ]
+                if col in filtered_df.columns
+            ]
+
+            if daily_campaign_columns:
+
+                daily_campaign_df = filtered_df[
+                    daily_campaign_columns
+                ].copy()
+
+                if "Cost (₹)" in daily_campaign_df.columns:
+                    daily_campaign_df = daily_campaign_df.sort_values(
+                        "Cost (₹)",
+                        ascending=False
+                    )
+
+                daily_campaign_df = daily_campaign_df.head(5)
+
+                daily_campaign_context = (
+                    daily_campaign_df
+                    .to_string(index=False)
+                )
+
+
+        daily_search_context = "No search-term data available."
+
+        if "search_df" in locals() and not search_df.empty:
+
+            daily_search_columns = [
+                col
+                for col in [
+                    "Search Term",
+                    "Campaign",
+                    "Clicks",
+                    "Cost (₹)",
+                    "Conversions"
+                ]
+                if col in search_df.columns
+            ]
+
+            if daily_search_columns and "Cost (₹)" in search_df.columns:
+
+                daily_search_ai_df = search_df[
+                    search_df["Cost (₹)"] > 0
+                ][daily_search_columns].copy()
+
+                daily_search_ai_df = daily_search_ai_df.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                ).head(10)
+
+                if not daily_search_ai_df.empty:
+                    daily_search_context = (
+                        daily_search_ai_df
+                        .to_string(index=False)
+                    )
+
+
+        if not priority_df.empty:
+            daily_priority_context = (
+                priority_df
+                .head(5)
+                .to_string(index=False)
+            )
+        else:
+            daily_priority_context = "No rule-based priority warning."
+
+
+        # --------------------------------------------------
+        # AI DAILY ACTION BUTTON
+        # --------------------------------------------------
+
+        st.info(
+            "AI uses only overall KPIs + Top 5 campaigns + Top 10 highest-spend "
+            "search terms. The full dashboard data stays on screen and is not "
+            "sent in this AI request."
+        )
+
+        if st.button(
+            "🧠 Generate Top 5 AI Actions",
+            key="ai_daily_action_center_button_v1"
+        ):
+
+            daily_ai_cache_key = (
+                f"{date_option}|{selected_campaign}|"
+                f"{total_impressions}|{total_clicks}|{total_cost}|"
+                f"{total_conversions}|{overall_ctr}|{overall_cpc}|"
+                f"{overall_cpa}|{overall_conversion_rate}|"
+                f"{daily_waste_amount}|{daily_campaign_context}|"
+                f"{daily_search_context}|{daily_priority_context}"
+            )
+
+            if (
+                st.session_state.get("daily_ai_cache_key")
+                == daily_ai_cache_key
+                and st.session_state.get("daily_ai_cache_text")
+            ):
+
+                daily_ai_text = st.session_state[
+                    "daily_ai_cache_text"
+                ]
+
+                st.success(
+                    "Showing the saved result for the same data. "
+                    "No new AI call was used."
+                )
+
+            else:
+
+                daily_action_prompt = f"""
+You are a senior Google Ads performance manager.
+
+BUSINESS:
+Harekrishna Home Care Services, Hyderabad.
+
+GOAL:
+Generate ONLY the 5 most useful actions to take now from the supplied data.
+
+SELECTED PERIOD:
+{date_option}
+
+SELECTED CAMPAIGN:
+{selected_campaign}
+
+OVERALL KPIs:
+Impressions: {total_impressions}
+Clicks: {total_clicks}
+Cost: ₹{total_cost:.2f}
+Conversions: {total_conversions:.2f}
+CTR: {overall_ctr:.2f}%
+Average CPC: ₹{overall_cpc:.2f}
+CPA: ₹{overall_cpa:.2f}
+Conversion Rate: {overall_conversion_rate:.2f}%
+Zero-conversion spend under review: ₹{daily_waste_amount:.2f}
+
+TOP 5 CAMPAIGNS BY SPEND:
+{daily_campaign_context}
+
+TOP 10 HIGHEST-SPEND SEARCH TERMS:
+{daily_search_context}
+
+RULE-BASED PRIORITY SIGNALS:
+{daily_priority_context}
+
+IMPORTANT RULES:
+1. Use only the supplied data. Never invent metrics, leads, revenue or competitor facts.
+2. Give exactly 5 actions, ranked from highest to lowest priority.
+3. Prefer actions that can improve qualified calls/leads and reduce waste.
+4. Do not recommend increasing budget when waste is high or conversions are weak.
+5. Do not recommend blocking Harekrishna/Hare Krishna brand or valid service themes
+   such as home care, elderly care, patient care, nursing, caretaker, baby care,
+   maid, domestic help, housekeeping or cook merely because they have zero conversions.
+6. For ambiguous or competitor terms, recommend REVIEW before blocking.
+7. If evidence is weak, say REVIEW instead of making a strong change.
+8. Keep the answer concise and practical.
+
+Return one Markdown table only with these columns:
+Priority | Area | What the Data Shows | Action Today | Expected Purpose | Risk / Check
+
+Priority must be:
+1 - Critical
+2 - High
+3 - Medium
+4 - Medium
+5 - Low
+"""
+
+                try:
+
+                    with st.spinner(
+                        "AI is preparing the Top 5 actions..."
+                    ):
+
+                        daily_ai_response = (
+                            openai_client.responses.create(
+                                model="gpt-5.4-mini",
+                                input=daily_action_prompt,
+                                max_output_tokens=1000
+                            )
+                        )
+
+                    daily_ai_text = (
+                        daily_ai_response.output_text
+                    )
+
+                    st.session_state[
+                        "daily_ai_cache_key"
+                    ] = daily_ai_cache_key
+
+                    st.session_state[
+                        "daily_ai_cache_text"
+                    ] = daily_ai_text
+
+                except Exception as daily_ai_error:
+
+                    daily_ai_text = None
+
+                    st.error(
+                        "AI Daily Action Center could not run right now. "
+                        "If this is a rate-limit or credit issue, wait or "
+                        "add API credit and try again once."
+                    )
+
+                    st.caption(
+                        f"Technical detail: {daily_ai_error}"
+                    )
+
+            if daily_ai_text:
+
+                st.subheader("🤖 Top 5 AI Actions")
+
+                st.caption(
+                    "AI used a compact context only: overall KPIs, Top 5 campaigns "
+                    "and Top 10 highest-spend search terms."
+                )
+
+                st.write(daily_ai_text)
+
+
         # ==================================================
         # # ONE-CLICK AI PERFORMANCE REPORT
         # ==================================================
