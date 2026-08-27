@@ -676,7 +676,7 @@ try:
         )
 
 
-        search_query = f"""
+                search_query = f"""
             SELECT
                 search_term_view.search_term,
                 campaign.name,
@@ -685,12 +685,12 @@ try:
                 metrics.cost_micros,
                 metrics.conversions
             FROM search_term_view
-           WHERE {date_filter_clause}
+            WHERE {date_filter_clause}
             ORDER BY metrics.cost_micros DESC
             LIMIT 100
         """
 
-                search_response = ga_service.search(
+        search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
         )
