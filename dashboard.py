@@ -1450,6 +1450,269 @@ try:
             st.info("Search term data is not available.")
 
         # ==================================================
+        # COMPETITOR SEARCH-TERM INTELLIGENCE
+        # TOKEN-EFFICIENT AI VERSION
+        # ==================================================
+
+        st.divider()
+        st.header("🏁 Competitor Intelligence")
+
+        st.caption(
+            "This section identifies competitor-style brand searches from "
+            "your Google Ads search-term data. It is not Auction Insights."
+        )
+
+        if "search_df" in locals() and not search_df.empty:
+
+            competitor_required_columns = [
+                "Search Term",
+                "Clicks",
+                "Cost (₹)",
+                "Conversions"
+            ]
+
+            competitor_missing_columns = [
+                col
+                for col in competitor_required_columns
+                if col not in search_df.columns
+            ]
+
+            if competitor_missing_columns:
+
+                st.warning(
+                    "Required competitor-analysis columns are missing: "
+                    + ", ".join(competitor_missing_columns)
+                )
+
+            else:
+
+                competitor_source_df = search_df.copy()
+
+                competitor_source_df = competitor_source_df[
+                    competitor_source_df["Cost (₹)"] > 0
+                ].copy()
+
+                competitor_source_df = competitor_source_df.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
+
+                if not competitor_source_df.empty:
+
+                    comp_col1, comp_col2, comp_col3 = st.columns(3)
+
+                    with comp_col1:
+                        st.metric(
+                            "Search Terms Available",
+                            f"{len(competitor_source_df):,}"
+                        )
+
+                    with comp_col2:
+                        st.metric(
+                            "Spend Represented",
+                            f"₹{float(competitor_source_df['Cost (₹)'].sum()):,.2f}"
+                        )
+
+                    with comp_col3:
+                        st.metric(
+                            "AI Terms Per Run",
+                            "Top 15"
+                        )
+
+                    st.info(
+                        "The dashboard keeps the full search-term dataset. "
+                        "Competitor AI sends only the Top 15 highest-spend "
+                        "search terms to OpenAI to control token usage."
+                    )
+
+                    if st.button(
+                        "🧠 Run Competitor Intelligence",
+                        key="competitor_intelligence_button_v1"
+                    ):
+
+                        competitor_ai_columns = ["Search Term"]
+
+                        if "Campaign" in competitor_source_df.columns:
+                            competitor_ai_columns.append("Campaign")
+
+                        competitor_ai_columns.extend(
+                            [
+                                "Clicks",
+                                "Cost (₹)",
+                                "Conversions"
+                            ]
+                        )
+
+                        competitor_ai_df = (
+                            competitor_source_df[
+                                competitor_ai_columns
+                            ]
+                            .head(15)
+                            .copy()
+                        )
+
+                        competitor_context = (
+                            competitor_ai_df
+                            .to_string(index=False)
+                        )
+
+                        competitor_cache_key = (
+                            f"{date_option}|{selected_campaign}|"
+                            f"{competitor_context}"
+                        )
+
+                        if (
+                            st.session_state.get(
+                                "competitor_ai_cache_key"
+                            ) == competitor_cache_key
+                            and st.session_state.get(
+                                "competitor_ai_cache_text"
+                            )
+                        ):
+
+                            competitor_ai_text = st.session_state[
+                                "competitor_ai_cache_text"
+                            ]
+
+                            st.success(
+                                "Showing the saved result for the same "
+                                "date range and campaign. No new AI call was used."
+                            )
+
+                        else:
+
+                            competitor_prompt = f"""
+You are a senior Google Ads competitor search-term analyst.
+
+BUSINESS:
+Harekrishna Home Care Services
+
+PRIMARY MARKET:
+Hyderabad
+
+VALID BUSINESS SERVICES:
+home care, elderly care, senior care, patient care,
+nursing, nurse at home, home nurse, caretaker,
+care taker, baby care, babysitter, nanny,
+maid, domestic help, housekeeping, housekeeper, cook.
+
+OWN BRAND — NEVER CLASSIFY AS A COMPETITOR:
+hare krishna
+harekrishna
+hare krishna home care
+harekrishna home care
+hare krishna home care services
+harekrishna home care services
+
+IMPORTANT RULES:
+1. Identify a competitor only when the supplied search term clearly
+   contains another business, agency, hospital, platform or brand name.
+2. Never invent competitor names that are not present in the supplied data.
+3. Do not classify generic searches such as "home care services near me",
+   "nurse near me", "caretaker hyderabad" or other service queries as competitors.
+4. Own Harekrishna / Hare Krishna brand searches are OWN BRAND, never competitor.
+5. Competitor searches should normally be REVIEW, not automatically blocked.
+6. Zero conversions alone is not enough reason to block a competitor term.
+7. If a competitor term converted, clearly highlight that it may be valuable traffic.
+8. If a competitor term has spend and zero conversions, recommend REVIEW first.
+9. Do not invent conversion quality, revenue, impression share or competitor market share.
+10. Use only the data below.
+
+SEARCH-TERM DATA TO ANALYZE:
+These are only the Top 15 highest-spend search terms for this AI run.
+
+{competitor_context}
+
+Return a concise Markdown table with these columns:
+Search Term | Campaign | Spend | Clicks | Conversions | Type | Competitor / Brand Detected | Recommended Action | Risk | Reason
+
+Type must be one of:
+OWN BRAND / COMPETITOR / GENERIC SERVICE / AMBIGUOUS / UNRELATED
+
+Recommended Action must be one of:
+KEEP / REVIEW / CONSIDER NEGATIVE
+
+After the table provide only:
+1. Competitors Detected
+2. Competitor Terms That Converted
+3. Competitor Terms With Spend + Zero Conversions
+4. Own Brand Terms Protected
+5. Top 3 Competitor Actions
+
+If no real competitor brand is visible in the supplied data, say clearly:
+"No clear competitor brand detected in the Top 15 terms."
+
+Keep the answer concise and do not invent data.
+"""
+
+                            try:
+
+                                with st.spinner(
+                                    "AI is checking competitor-style search terms..."
+                                ):
+
+                                    competitor_ai_response = (
+                                        openai_client.responses.create(
+                                            model="gpt-5.4-mini",
+                                            input=competitor_prompt,
+                                            max_output_tokens=1600
+                                        )
+                                    )
+
+                                competitor_ai_text = (
+                                    competitor_ai_response.output_text
+                                )
+
+                                st.session_state[
+                                    "competitor_ai_cache_key"
+                                ] = competitor_cache_key
+
+                                st.session_state[
+                                    "competitor_ai_cache_text"
+                                ] = competitor_ai_text
+
+                            except Exception as competitor_ai_error:
+
+                                competitor_ai_text = None
+
+                                st.error(
+                                    "Competitor AI could not run right now. "
+                                    "If this is a rate-limit or credit issue, "
+                                    "wait or add API credit and try again once."
+                                )
+
+                                st.caption(
+                                    f"Technical detail: {competitor_ai_error}"
+                                )
+
+                        if competitor_ai_text:
+
+                            st.subheader(
+                                "🤖 Competitor Search-Term Analysis"
+                            )
+
+                            st.caption(
+                                "AI analyzed only the Top 15 highest-spend "
+                                "search terms. Full search-term data remains "
+                                "available in the dashboard."
+                            )
+
+                            st.write(competitor_ai_text)
+
+                else:
+
+                    st.info(
+                        "No search terms with spend are available for "
+                        "competitor analysis."
+                    )
+
+        else:
+
+            st.info(
+                "Search term data is not available for competitor analysis."
+            )
+
+        # ==================================================
         # AI PRIORITY ACTION CENTER
         # ==================================================
 
