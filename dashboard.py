@@ -657,7 +657,7 @@ try:
 
         st.divider()
 
-        # ==================================================
+                # ==================================================
         # CAMPAIGN COMPARISON
         # ==================================================
 
@@ -673,6 +673,11 @@ try:
             conversion_chart,
             width="stretch"
         )
+
+        # ==================================================
+        # SEARCH TERMS QUERY
+        # ==================================================
+
         search_query = f"""
             SELECT
                 search_term_view.search_term,
@@ -690,31 +695,7 @@ try:
         search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
-        ) 
-                      
-        # --------------------------
-        # TABLE
-        # --------------------------
-
-        st.subheader("Daily Performance Table")
-
-        st.dataframe(
-            daily_df.reset_index(),
-            use_container_width=True
         )
-
-    else:
-
-        st.warning(
-            "No daily performance data available for the selected date range."
-        )
-
-except Exception as e:
-
-    st.error(
-        f"Daily Performance Error: {e}"
-    )
-
 
 st.divider()
 
