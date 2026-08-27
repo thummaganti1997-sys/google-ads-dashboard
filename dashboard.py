@@ -657,8 +657,7 @@ try:
 
         st.divider()
 
-
-                       # ==================================================
+        # ==================================================
         # CAMPAIGN COMPARISON
         # ==================================================
 
@@ -674,7 +673,6 @@ try:
             conversion_chart,
             width="stretch"
         )
-
         search_query = f"""
             SELECT
                 search_term_view.search_term,
@@ -693,6 +691,7 @@ try:
             customer_id=customer_id,
             query=search_query
         ) 
+                      
         # --------------------------
         # TABLE
         # --------------------------
