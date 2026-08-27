@@ -356,7 +356,7 @@ date_options = [
 
 # Default date range
 if "date_option" not in st.session_state:
-    st.session_state.date_option = "Today"
+    st.session_state.date_option = "Last 30 Days"
 
 # AI requested date range varsa, apply it before creating widget
 if "pending_ai_date_option" in st.session_state:
@@ -567,58 +567,6 @@ try:
 
 
         # ==================================================
-        # TOP METRICS
-        # ==================================================
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        col1.metric(
-            "Impressions",
-            f"{total_impressions:,}"
-        )
-
-        col2.metric(
-            "Clicks",
-            f"{total_clicks:,}"
-        )
-
-        col3.metric(
-            "Cost",
-            f"₹{total_cost:,.2f}"
-        )
-
-        col4.metric(
-            "Conversions",
-            f"{total_conversions:.2f}"
-        )
-
-
-        col5, col6, col7, col8 = st.columns(4)
-
-        col5.metric(
-            "CTR",
-            f"{overall_ctr:.2f}%"
-        )
-
-        col6.metric(
-            "Avg CPC",
-            f"₹{overall_cpc:.2f}"
-        )
-
-        col7.metric(
-            "CPA",
-            f"₹{overall_cpa:.2f}"
-        )
-
-        col8.metric(
-            "Conversion Rate",
-            f"{overall_conversion_rate:.2f}%"
-        )
-
-        st.divider()
-
-
-        # ==================================================
         # CAMPAIGN FILTER
         # ==================================================
 
@@ -644,7 +592,83 @@ try:
             ].copy()
 
 
-                # ==================================================
+        # ==================================================
+        # TOP METRICS — SELECTED CAMPAIGN VIEW
+        # ==================================================
+
+        selected_impressions = filtered_df["Impressions"].sum()
+        selected_clicks = filtered_df["Clicks"].sum()
+        selected_cost = filtered_df["Cost (₹)"].sum()
+        selected_conversions = filtered_df["Conversions"].sum()
+
+        selected_ctr = (
+            selected_clicks / selected_impressions * 100
+            if selected_impressions else 0
+        )
+
+        selected_cpc = (
+            selected_cost / selected_clicks
+            if selected_clicks else 0
+        )
+
+        selected_cpa = (
+            selected_cost / selected_conversions
+            if selected_conversions else 0
+        )
+
+        selected_conversion_rate = (
+            selected_conversions / selected_clicks * 100
+            if selected_clicks else 0
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric(
+            "Impressions",
+            f"{selected_impressions:,}"
+        )
+
+        col2.metric(
+            "Clicks",
+            f"{selected_clicks:,}"
+        )
+
+        col3.metric(
+            "Cost",
+            f"₹{selected_cost:,.2f}"
+        )
+
+        col4.metric(
+            "Conversions",
+            f"{selected_conversions:.2f}"
+        )
+
+        col5, col6, col7, col8 = st.columns(4)
+
+        col5.metric(
+            "CTR",
+            f"{selected_ctr:.2f}%"
+        )
+
+        col6.metric(
+            "Avg CPC",
+            f"₹{selected_cpc:.2f}"
+        )
+
+        col7.metric(
+            "CPA",
+            f"₹{selected_cpa:.2f}"
+        )
+
+        col8.metric(
+            "Conversion Rate",
+            f"{selected_conversion_rate:.2f}%"
+        )
+
+        st.divider()
+
+
+        # ==================================================
         # CAMPAIGN PERFORMANCE
         # ==================================================
 
@@ -859,26 +883,16 @@ try:
                 width="stretch"
             )
 
-            st.subheader("Daily Performance Table")
-
-            st.dataframe(
-                daily_df.reset_index(),
-                width="stretch",
-                hide_index=True
-            )
-
         else:
             st.info(
                 "No daily performance data available for the selected date range."
             )
 
         # ==================================================
-        # POTENTIAL WASTE SPEND
+        # SUPPORTING DATA — POTENTIAL WASTE SPEND
+        # Backend only; visible waste analysis is handled by
+        # Advanced Negative AI and Waste Risk Intelligence.
         # ==================================================
-
-        st.divider()
-
-        st.header("💸 Potential Waste Spend")
 
         if not search_df.empty:
 
@@ -889,361 +903,17 @@ try:
             ].copy()
 
             if not waste_df.empty:
-
                 waste_df = waste_df.sort_values(
                     "Cost (₹)",
                     ascending=False
                 )
 
-                st.warning(
-                    "These search terms have spend but 0 conversions."
-                )
-
-                st.dataframe(
-                    waste_df,
-                    width="stretch"
-                )
-
-            else:
-
-                st.success(
-                    "No major waste spend found."
-                )
-
         else:
 
-            st.info(
-                "No search term data available."
+            waste_df = pd.DataFrame(
+                columns=search_df.columns
             )
 
-        # ==================================================
-        # PERFORMANCE INSIGHTS
-        # ==================================================
-
-        st.divider()
-
-        st.header("🏆 Performance Insights")
-
-        if not filtered_df.empty:
-
-            insights_df = filtered_df.copy()
-
-            # Calculate CTR
-            insights_df["CTR (%)"] = (
-                insights_df["Clicks"]
-                / insights_df["Impressions"].replace(0, 1)
-                * 100
-            )
-
-            # Calculate CPA
-            insights_df["CPA (₹)"] = insights_df.apply(
-                lambda row:
-                row["Cost (₹)"] / row["Conversions"]
-                if row["Conversions"] > 0 else 0,
-                axis=1
-            )
-
-            best_campaign = insights_df.loc[
-                insights_df["Conversions"].idxmax()
-            ]
-
-            highest_spend = insights_df.loc[
-                insights_df["Cost (₹)"].idxmax()
-            ]
-
-            highest_ctr = insights_df.loc[
-                insights_df["CTR (%)"].idxmax()
-            ]
-
-            campaigns_with_conversions = insights_df[
-                insights_df["Conversions"] > 0
-            ]
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric(
-                    "🎯 Best Conversions",
-                    best_campaign["Campaign"],
-                    f'{best_campaign["Conversions"]:.0f} conversions'
-                )
-
-            with col2:
-                st.metric(
-                    "💰 Highest Spend",
-                    highest_spend["Campaign"],
-                    f'₹{highest_spend["Cost (₹)"]:,.2f}'
-                )
-
-            with col3:
-                st.metric(
-                    "📈 Highest CTR",
-                    highest_ctr["Campaign"],
-                    f'{highest_ctr["CTR (%)"]:.2f}%'
-                )
-
-            if not campaigns_with_conversions.empty:
-
-                best_cpa = campaigns_with_conversions.loc[
-                    campaigns_with_conversions["CPA (₹)"].idxmin()
-                ]
-
-                st.success(
-                    f'🏆 Best CPA Campaign: '
-                    f'{best_cpa["Campaign"]} | '
-                    f'CPA: ₹{best_cpa["CPA (₹)"]:,.2f}'
-                )
-
-            else:
-
-                st.info(
-                    "No campaigns with conversions available for CPA analysis."
-                )
-
-        else:
-
-            st.info(
-                "No campaign data available."
-            )
-        # ==================================================
-        # SMART ALERTS
-        # ==================================================
-
-        st.divider()
-        st.header("🚨 Smart Alerts")
-
-        alerts = []
-
-        # High CPA Alert
-        if overall_cpa > 2000:
-            alerts.append(
-                f"🔴 High CPA Alert: Your CPA is ₹{overall_cpa:,.2f}. "
-                "Consider reducing spend on expensive keywords."
-            )
-
-        # Low CTR Alert
-        if overall_ctr < 3:
-            alerts.append(
-                f"⚠️ Low CTR Alert: Your CTR is {overall_ctr:.2f}%. "
-                "Improve ad copy and keyword relevance."
-            )
-
-        # Low Conversion Rate Alert
-        if overall_conversion_rate < 2:
-            alerts.append(
-                f"⚠️ Low Conversion Rate: {overall_conversion_rate:.2f}%. "
-                "Review landing page and search terms."
-            )
-
-        # High CPC Alert
-        if overall_cpc > 60:
-            alerts.append(
-                f"💰 High CPC Alert: Average CPC is ₹{overall_cpc:.2f}. "
-                "Focus on high-intent keywords."
-            )
-
-        # Waste Spend Alert
-        if 'waste_df' in locals() and not waste_df.empty:
-
-            total_waste = waste_df["Cost (₹)"].sum()
-
-            if total_waste > 500:
-
-                alerts.append(
-                    f"🔴 Potential Waste Spend: ₹{total_waste:,.2f} spent "
-                    "on search terms with 0 conversions."
-                )
-
-
-        # DISPLAY ALERTS
-
-        if alerts:
-
-            for alert in alerts:
-
-                st.warning(alert)
-
-        else:
-
-            st.success(
-                "🟢 Great! No major performance alerts detected."
-            )
-        # ==================================================
-        # CAMPAIGN RECOMMENDATIONS
-        # ==================================================
-
-        st.divider()
-        st.header("🎯 Campaign Recommendations")
-
-        if not filtered_df.empty:
-
-            recommendations = []
-
-            for _, row in filtered_df.iterrows():
-
-                campaign = row["Campaign"]
-                cost = float(row["Cost (₹)"])
-                conversions = float(row["Conversions"])
-                clicks = float(row["Clicks"])
-                impressions = float(row["Impressions"])
-
-                ctr = (
-                    clicks / impressions * 100
-                    if impressions > 0
-                    else 0
-                )
-
-                cpa = (
-                    cost / conversions
-                    if conversions > 0
-                    else 0
-                )
-
-                if conversions == 0 and cost > 500:
-
-                    status = "🔴 Review / Pause"
-                    recommendation = (
-                        "High spend with 0 conversions. "
-                        "Review keywords and search terms."
-                    )
-
-                elif conversions > 0 and cpa > overall_cpa:
-
-                    status = "⚠️ Optimize"
-                    recommendation = (
-                        f"CPA is ₹{cpa:,.2f}. "
-                        "Reduce waste and improve keyword targeting."
-                    )
-
-                elif conversions > 0 and cpa <= overall_cpa:
-
-                    status = "🟢 Scale"
-                    recommendation = (
-                        f"Good CPA of ₹{cpa:,.2f}. "
-                        "Consider increasing budget."
-                    )
-
-                elif ctr > overall_ctr and conversions == 0:
-
-                    status = "🟡 Check Landing Page"
-                    recommendation = (
-                        "Good CTR but no conversions. "
-                        "Review landing page and conversion tracking."
-                    )
-
-                else:
-
-                    status = "🟡 Monitor"
-                    recommendation = (
-                        "Continue monitoring campaign performance."
-                    )
-
-                recommendations.append({
-                    "Campaign": campaign,
-                    "Status": status,
-                    "Recommendation": recommendation
-                })
-
-            if recommendations:
-
-                recommendation_df = pd.DataFrame(recommendations)
-
-                st.dataframe(
-                    recommendation_df,
-                    width="stretch",
-                    hide_index=True
-                )
-
-            else:
-
-                st.info(
-                    "No campaign recommendations available."
-                )
-
-        else:
-
-            st.info(
-                "No campaign data available for recommendations."
-            )
-            
-           # ==================================================
-        # BUDGET OPTIMIZATION
-        # ==================================================
-
-        st.divider()
-        st.header("💰 Budget Optimization Suggestions")
-
-        if not filtered_df.empty:
-
-            budget_suggestions = []
-
-            for _, row in filtered_df.iterrows():
-
-                campaign = row["Campaign"]
-                cost = float(row["Cost (₹)"])
-                conversions = float(row["Conversions"])
-
-                cpa = (
-                    cost / conversions
-                    if conversions > 0 else 0
-                )
-
-                if conversions == 0 and cost > 500:
-
-                    action = "🔴 Reduce / Stop"
-                    suggestion = (
-                        "Spend is high but there are no conversions. "
-                        "Reduce budget and review search terms."
-                    )
-
-                elif conversions > 0 and cpa < overall_cpa * 0.8:
-
-                    action = "🟢 Increase Budget"
-                    suggestion = (
-                        f"Strong performance with CPA ₹{cpa:,.2f}. "
-                        "Consider increasing budget by 10–20%."
-                    )
-
-                elif conversions > 0 and cpa > overall_cpa * 1.2:
-
-                    action = "🟠 Reduce Budget"
-                    suggestion = (
-                        f"CPA ₹{cpa:,.2f} is above average. "
-                        "Optimize keywords before increasing spend."
-                    )
-
-                else:
-
-                    action = "🟡 Maintain"
-                    suggestion = (
-                        "Performance is close to account average. "
-                        "Keep budget stable and continue monitoring."
-                    )
-
-                budget_suggestions.append({
-                    "Campaign": campaign,
-                    "Cost (₹)": round(cost, 2),
-                    "Conversions": round(conversions, 2),
-                    "CPA (₹)": round(cpa, 2) if conversions > 0 else "N/A",
-                    "Action": action,
-                    "Suggestion": suggestion
-                })
-
-
-            budget_df = pd.DataFrame(budget_suggestions)
-
-            st.dataframe(
-                budget_df,
-                width="stretch",
-                hide_index=True
-            )
-
-        else:
-
-            st.info(
-                "No campaign data available for budget optimization."
-            )
-               
 
         # ==================================================
         # ADVANCED AI NEGATIVE KEYWORD INTELLIGENCE V2
@@ -2961,55 +2631,6 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 )
                 st.write(report_ai_text)
 
-
-        # ==================================================
-        # FINAL AI RECOMMENDATIONS SUMMARY
-        # ==================================================
-
-        st.divider()
-        st.header("📌 Final AI Recommendations Summary")
-
-        summary_actions = []
-
-        if total_conversions == 0:
-            summary_actions.append(
-                "🔴 Check conversion tracking and landing page immediately."
-            )
-
-        if overall_cpc > 60:
-            summary_actions.append(
-                f"🟠 Avg CPC is high at ₹{overall_cpc:.2f}. Review expensive keywords."
-            )
-
-        if overall_cpa > 2000 and total_conversions > 0:
-            summary_actions.append(
-                f"🔴 CPA is high at ₹{overall_cpa:.2f}. Reduce waste and optimize targeting."
-            )
-
-        if "waste_df" in locals() and not waste_df.empty:
-            waste_amount = waste_df["Cost (₹)"].sum()
-
-            summary_actions.append(
-                f"🔴 Review ₹{waste_amount:,.2f} potential waste spend."
-            )
-
-        if overall_ctr >= 8:
-            summary_actions.append(
-                f"🟢 CTR is strong at {overall_ctr:.2f}%. Keep high-performing ads running."
-            )
-
-        if summary_actions:
-            for i, action in enumerate(
-                summary_actions[:5],
-                start=1
-            ):
-                st.write(
-                    f"**{i}. {action}**"
-                )
-        else:
-            st.success(
-                "🟢 Account performance looks stable. Continue monitoring."
-            )
 
         # ==================================================
         # ACCOUNT HEALTH SCORE
