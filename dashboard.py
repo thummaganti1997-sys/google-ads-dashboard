@@ -690,7 +690,6 @@ try:
             FROM search_term_view
             WHERE {date_filter_clause}
             ORDER BY metrics.cost_micros DESC
-            LIMIT 100
         """
 
         search_response = ga_service.search(
