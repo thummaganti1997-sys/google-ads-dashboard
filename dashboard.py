@@ -658,66 +658,22 @@ try:
         st.divider()
 
 
-        # ==================================================
+                # ==================================================
         # CAMPAIGN COMPARISON
         # ==================================================
 
         st.header("📈 Campaign Comparison")
 
-        chart_col1, chart_col2 = st.columns(2)
+        st.subheader("Conversions by Campaign")
 
-        with chart_col1:
+        conversion_chart = filtered_df[
+            ["Campaign", "Conversions"]
+        ].set_index("Campaign")
 
-            st.subheader("Clicks by Campaign")
-
-            click_chart = filtered_df[
-                ["Campaign", "Clicks"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                click_chart,
-                use_container_width=True
-            )
-
-            st.subheader("Conversions by Campaign")
-
-            conversion_chart = filtered_df[
-                ["Campaign", "Conversions"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                conversion_chart,
-                use_container_width=True
-            )
-
-
-        with chart_col2:
-
-            st.subheader("Cost by Campaign")
-
-            cost_chart = filtered_df[
-                ["Campaign", "Cost (₹)"]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                cost_chart,
-                use_container_width=True
-            )
-
-            st.subheader("Clicks vs Conversions")
-
-            comparison_chart = filtered_df[
-                [
-                    "Campaign",
-                    "Clicks",
-                    "Conversions"
-                ]
-            ].set_index("Campaign")
-
-            st.bar_chart(
-                comparison_chart,
-                use_container_width=True
-            )
+        st.bar_chart(
+            conversion_chart,
+            width="stretch"
+        )
 
 
         search_query = f"""
@@ -737,135 +693,16 @@ try:
         search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
-        )# ==================================================
-# DAILY PERFORMANCE
-# ==================================================
-except Exception as e:
-    st.error(f"Error: {e}")
-st.divider()
-st.header("📅 Daily Performance")
+                # --------------------------
+        # DAILY TREND
+        # --------------------------
 
-try:
+        st.subheader("Daily Performance Trend")
 
-    daily_query = f"""
-        SELECT
-            segments.date,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.cost_micros,
-            metrics.conversions
-        FROM customer
-        WHERE {date_filter_clause}
-        ORDER BY segments.date
-    """
-
-    daily_response = ga_service.search(
-        customer_id=customer_id,
-        query=daily_query
-    )
-
-    daily_data = []
-
-    for row in daily_response:
-
-        impressions = int(row.metrics.impressions or 0)
-        clicks = int(row.metrics.clicks or 0)
-        cost = float(row.metrics.cost_micros or 0) / 1_000_000
-        conversions = float(row.metrics.conversions or 0)
-
-        ctr = (clicks / impressions * 100) if impressions > 0 else 0
-        cpc = (cost / clicks) if clicks > 0 else 0
-        cpa = (cost / conversions) if conversions > 0 else 0
-
-        daily_data.append({
-            "Date": str(row.segments.date),
-            "Impressions": impressions,
-            "Clicks": clicks,
-            "Cost": round(cost, 2),
-            "Conversions": round(conversions, 2),
-            "CTR": round(ctr, 2),
-            "CPC": round(cpc, 2),
-            "CPA": round(cpa, 2)
-        })
-
-    if daily_data:
-
-        daily_df = pd.DataFrame(daily_data)
-
-        # Convert date correctly
-        daily_df["Date"] = pd.to_datetime(
-            daily_df["Date"],
-            errors="coerce"
+        st.line_chart(
+            daily_df[["Clicks", "Conversions"]],
+            width="stretch"
         )
-
-        # Remove invalid dates
-        daily_df = daily_df.dropna(subset=["Date"])
-
-        # Sort dates correctly
-        daily_df = daily_df.sort_values("Date")
-
-        # Set Date as index
-        daily_df = daily_df.set_index("Date")
-
-        # --------------------------
-        # ROW 1
-        # --------------------------
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Clicks per Day")
-            st.line_chart(
-                daily_df["Clicks"],
-                use_container_width=True
-            )
-
-        with col2:
-            st.subheader("Cost per Day")
-            st.line_chart(
-                daily_df["Cost"],
-                use_container_width=True
-            )
-
-        # --------------------------
-        # ROW 2
-        # --------------------------
-
-        col3, col4 = st.columns(2)
-
-        with col3:
-            st.subheader("CTR per Day")
-            st.line_chart(
-                daily_df["CTR"],
-                use_container_width=True
-            )
-
-        with col4:
-            st.subheader("CPC per Day")
-            st.line_chart(
-                daily_df["CPC"],
-                use_container_width=True
-            )
-
-        # --------------------------
-        # ROW 3
-        # --------------------------
-
-        col5, col6 = st.columns(2)
-
-        with col5:
-            st.subheader("Conversions per Day")
-            st.line_chart(
-                daily_df["Conversions"],
-                use_container_width=True
-            )
-
-        with col6:
-            st.subheader("CPA per Day")
-            st.line_chart(
-                daily_df["CPA"],
-                use_container_width=True
-            )
 
         # --------------------------
         # TABLE
