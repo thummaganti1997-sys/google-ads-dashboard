@@ -1,4 +1,4 @@
-
+import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from google.ads.googleads.client import GoogleAdsClient
@@ -13,6 +13,7 @@ st.set_page_config(
     page_title="Google Ads AI Dashboard",
     layout="wide"
 )
+
 
 st.markdown("""
 <style>
