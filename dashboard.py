@@ -1450,7 +1450,7 @@ try:
 
         # ==================================================
         # COMPETITOR SEARCH-TERM INTELLIGENCE
-        # FULL-DATA LOCAL SCAN + TOP-15 AI CANDIDATES
+        # FULL-CANDIDATE SCAN + BATCHED AI (15 TERMS PER CALL)
         # ==================================================
 
         st.divider()
@@ -1458,8 +1458,9 @@ try:
 
         st.caption(
             "Scans the full selected-period search-term dataset locally, "
-            "then sends only the Top 15 likely brand / competitor / ambiguous "
-            "terms to AI. This is search-term intelligence, not Auction Insights."
+            "then sends EVERY likely brand / competitor / ambiguous candidate "
+            "to AI in batches of up to 15 terms. There is no Top-15 total cap. "
+            "This is search-term intelligence, not Auction Insights."
         )
 
         if "search_df" in locals() and not search_df.empty:
@@ -1486,10 +1487,20 @@ try:
 
             else:
 
+                import hashlib
+                import json
+
                 competitor_source_df = search_df.copy()
 
+                competitor_source_df["Search Term"] = (
+                    competitor_source_df["Search Term"]
+                    .fillna("")
+                    .astype(str)
+                    .str.strip()
+                )
+
                 competitor_source_df = competitor_source_df[
-                    competitor_source_df["Cost (₹)"] > 0
+                    competitor_source_df["Search Term"] != ""
                 ].copy()
 
                 competitor_source_df = competitor_source_df.sort_values(
@@ -1500,7 +1511,7 @@ try:
                 if not competitor_source_df.empty:
 
                     # ------------------------------------------
-                    # LOCAL BRAND-LIKELIHOOD SCAN
+                    # LOCAL FULL-DATA CANDIDATE SCAN
                     # No OpenAI tokens are used here.
                     # ------------------------------------------
 
@@ -1521,13 +1532,67 @@ try:
                         "baby", "babysitter", "babysitters", "nanny", "nannies",
                         "maid", "maids", "domestic", "help", "housekeeping",
                         "housekeeper", "housekeepers", "cook", "cooks",
-                        "doctor", "doctors", "medical", "health", "healthcare",
+                        "doctor", "doctors", "medical", "health",
                         "at", "in", "for", "of", "the", "and", "to", "with",
                         "near", "me", "my", "our", "your", "best", "top",
                         "good", "professional", "private", "personal", "personalized",
                         "24", "7", "24x7", "hour", "hours", "day", "days",
-                        "hyderabad", "secunderabad", "telangana", "india"
+                        "hyderabad", "secunderabad", "telangana"
                     }
+
+                    business_marker_phrases = [
+                        "agency",
+                        "company",
+                        "pvt",
+                        "private limited",
+                        "ltd",
+                        "limited",
+                        "llp",
+                        "hospital",
+                        "clinic",
+                        "foundation",
+                        "trust",
+                        "solutions",
+                        "centre",
+                        "center",
+                        "nursing home",
+                        "old age home",
+                        "old age homes",
+                        "retirement home",
+                        "retirement homes",
+                        "senior living",
+                        "assisted living",
+                        "rehab",
+                        "rehabilitation",
+                        "wellness"
+                    ]
+
+                    navigational_marker_phrases = [
+                        "phone number",
+                        "contact number",
+                        "address",
+                        "photos",
+                        "reviews",
+                        "review"
+                    ]
+
+                    alternate_service_phrases = [
+                        "massage",
+                        "therapy",
+                        "physiotherapy",
+                        "nursing home",
+                        "old age home",
+                        "old age homes",
+                        "hospital",
+                        "clinic"
+                    ]
+
+                    def is_own_brand_term(search_term):
+                        term = str(search_term).strip().lower()
+                        return any(
+                            brand_phrase in term
+                            for brand_phrase in own_brand_phrases
+                        )
 
                     def competitor_brand_score(search_term):
                         term = str(search_term).strip().lower()
@@ -1535,10 +1600,7 @@ try:
                         if not term:
                             return -999
 
-                        if any(
-                            brand_phrase in term
-                            for brand_phrase in own_brand_phrases
-                        ):
+                        if is_own_brand_term(term):
                             return -999
 
                         cleaned = "".join(
@@ -1562,23 +1624,28 @@ try:
                             and not token.isdigit()
                         ]
 
-                        # Unknown words are useful signals for names/brands.
+                        # Any non-generic word can be a name, place, brand,
+                        # facility, platform or unusual intent signal.
                         score = len(set(unknown_tokens)) * 3
 
-                        # Short unknown terms can be a one-word brand.
-                        if len(tokens) <= 3 and unknown_tokens:
+                        if len(tokens) <= 4 and unknown_tokens:
                             score += 2
 
-                        # Terms with explicit agency/company-style wording
-                        # deserve extra review, but AI still makes the final call.
-                        company_markers = {
-                            "agency", "company", "centre", "center",
-                            "hospital", "foundation", "solutions"
-                        }
+                        if any(
+                            marker in term
+                            for marker in business_marker_phrases
+                        ):
+                            score += 5
 
                         if any(
-                            marker in tokens
-                            for marker in company_markers
+                            marker in term
+                            for marker in navigational_marker_phrases
+                        ):
+                            score += 2
+
+                        if any(
+                            marker in term
+                            for marker in alternate_service_phrases
                         ):
                             score += 2
 
@@ -1590,8 +1657,16 @@ try:
                         "Search Term"
                     ].apply(competitor_brand_score)
 
-                    # First preference: brand-like / ambiguous terms found
-                    # anywhere in the full selected-period dataset.
+                    # Own brand is detected across the FULL data and is never
+                    # sent as a competitor candidate.
+                    own_brand_df = competitor_source_df[
+                        competitor_source_df["Search Term"].apply(
+                            is_own_brand_term
+                        )
+                    ].copy()
+
+                    # IMPORTANT: no .head(15) here. Every locally detected
+                    # candidate is kept and processed in 15-term AI batches.
                     competitor_candidate_df = competitor_source_df[
                         competitor_source_df[
                             "_Brand Candidate Score"
@@ -1601,48 +1676,21 @@ try:
                     competitor_candidate_df = competitor_candidate_df.sort_values(
                         ["_Brand Candidate Score", "Cost (₹)"],
                         ascending=[False, False]
+                    ).reset_index(drop=True)
+
+                    competitor_candidate_df["Row ID"] = range(
+                        1,
+                        len(competitor_candidate_df) + 1
                     )
 
-                    # If fewer than 15 brand-like candidates exist, fill the
-                    # remaining slots with highest-spend non-own-brand terms.
-                    if len(competitor_candidate_df) < 15:
+                    competitor_batch_size = 15
+                    competitor_batch_count = (
+                        len(competitor_candidate_df)
+                        + competitor_batch_size
+                        - 1
+                    ) // competitor_batch_size
 
-                        selected_candidate_indexes = set(
-                            competitor_candidate_df.index.tolist()
-                        )
-
-                        fallback_df = competitor_source_df[
-                            ~competitor_source_df.index.isin(
-                                selected_candidate_indexes
-                            )
-                        ].copy()
-
-                        fallback_df = fallback_df[
-                            fallback_df[
-                                "_Brand Candidate Score"
-                            ] > -999
-                        ].sort_values(
-                            "Cost (₹)",
-                            ascending=False
-                        )
-
-                        competitor_candidate_df = pd.concat(
-                            [
-                                competitor_candidate_df,
-                                fallback_df.head(
-                                    15 - len(competitor_candidate_df)
-                                )
-                            ],
-                            ignore_index=False
-                        )
-
-                    competitor_candidate_df = (
-                        competitor_candidate_df
-                        .head(15)
-                        .copy()
-                    )
-
-                    comp_col1, comp_col2, comp_col3 = st.columns(3)
+                    comp_col1, comp_col2, comp_col3, comp_col4 = st.columns(4)
 
                     with comp_col1:
                         st.metric(
@@ -1652,29 +1700,66 @@ try:
 
                     with comp_col2:
                         st.metric(
-                            "Spend Represented",
-                            f"₹{float(competitor_source_df['Cost (₹)'].sum()):,.2f}"
+                            "AI Candidate Terms",
+                            f"{len(competitor_candidate_df):,}"
                         )
 
                     with comp_col3:
                         st.metric(
-                            "AI Candidate Terms",
-                            f"Top {len(competitor_candidate_df)}"
+                            "AI Batches",
+                            f"{competitor_batch_count:,}"
+                        )
+
+                    with comp_col4:
+                        st.metric(
+                            "Spend Represented",
+                            f"₹{float(competitor_source_df['Cost (₹)'].sum()):,.2f}"
                         )
 
                     st.info(
                         "Full search-term data is scanned locally first. "
-                        "AI receives only up to 15 likely brand / competitor / "
-                        "ambiguous candidates, so competitor names can be found "
-                        "even when they are not among the highest-spend generic terms."
+                        "Every likely brand / competitor / ambiguous candidate "
+                        "is then analyzed in batches of up to 15 terms. "
+                        "The first full scan can use multiple AI calls; the same "
+                        "batch data is cached so repeat runs do not call AI again."
                     )
 
-                    if st.button(
-                        "🧠 Run Competitor Intelligence",
-                        key="competitor_intelligence_button_v2"
+                    if own_brand_df.empty:
+                        st.caption(
+                            "No Harekrishna own-brand search term was found in "
+                            "the current selected-period data."
+                        )
+                    else:
+                        st.caption(
+                            f"🛡 Own-brand terms protected locally: "
+                            f"{len(own_brand_df):,}"
+                        )
+
+                    if competitor_candidate_df.empty:
+
+                        st.success(
+                            "No likely brand / competitor / ambiguous search-term "
+                            "candidates were found in the selected-period data."
+                        )
+
+                    elif st.button(
+                        "🧠 Run Full Competitor Scan",
+                        key="competitor_intelligence_full_scan_v3"
                     ):
 
-                        competitor_ai_columns = ["Search Term"]
+                        if "competitor_batch_cache_v3" not in st.session_state:
+                            st.session_state[
+                                "competitor_batch_cache_v3"
+                            ] = {}
+
+                        competitor_batch_cache = st.session_state[
+                            "competitor_batch_cache_v3"
+                        ]
+
+                        competitor_ai_columns = [
+                            "Row ID",
+                            "Search Term"
+                        ]
 
                         if "Campaign" in competitor_candidate_df.columns:
                             competitor_ai_columns.append("Campaign")
@@ -1687,42 +1772,64 @@ try:
                             ]
                         )
 
-                        competitor_ai_df = competitor_candidate_df[
-                            competitor_ai_columns
-                        ].copy()
+                        all_competitor_ai_rows = []
+                        cached_batch_count = 0
+                        new_ai_batch_count = 0
+                        failed_batch_count = 0
 
-                        competitor_context = (
-                            competitor_ai_df
-                            .to_string(index=False)
-                        )
+                        competitor_progress = st.progress(0)
+                        competitor_status = st.empty()
 
-                        competitor_cache_key = (
-                            f"v2|{date_option}|{selected_campaign}|"
-                            f"{competitor_context}"
-                        )
-
-                        if (
-                            st.session_state.get(
-                                "competitor_ai_cache_key_v2"
-                            ) == competitor_cache_key
-                            and st.session_state.get(
-                                "competitor_ai_cache_text_v2"
-                            )
+                        for batch_number, start_index in enumerate(
+                            range(
+                                0,
+                                len(competitor_candidate_df),
+                                competitor_batch_size
+                            ),
+                            start=1
                         ):
 
-                            competitor_ai_text = st.session_state[
-                                "competitor_ai_cache_text_v2"
-                            ]
+                            batch_df = competitor_candidate_df.iloc[
+                                start_index:
+                                start_index + competitor_batch_size
+                            ][competitor_ai_columns].copy()
 
-                            st.success(
-                                "Showing the saved result for the same "
-                                "candidate data. No new AI call was used."
+                            batch_records = batch_df.to_dict(
+                                orient="records"
                             )
 
-                        else:
+                            batch_context = json.dumps(
+                                batch_records,
+                                ensure_ascii=False,
+                                default=str
+                            )
 
-                            competitor_prompt = f"""
-You are a senior Google Ads competitor search-term analyst.
+                            batch_cache_payload = (
+                                f"v3|{date_option}|{selected_campaign}|"
+                                f"{batch_context}"
+                            )
+
+                            batch_cache_key = hashlib.sha256(
+                                batch_cache_payload.encode("utf-8")
+                            ).hexdigest()
+
+                            competitor_status.caption(
+                                f"Analyzing competitor batch "
+                                f"{batch_number} of {competitor_batch_count}..."
+                            )
+
+                            if batch_cache_key in competitor_batch_cache:
+
+                                batch_result_rows = competitor_batch_cache[
+                                    batch_cache_key
+                                ]
+
+                                cached_batch_count += 1
+
+                            else:
+
+                                competitor_prompt = f"""
+You are a senior Google Ads competitor search-term classifier.
 
 BUSINESS:
 Harekrishna Home Care Services
@@ -1730,7 +1837,7 @@ Harekrishna Home Care Services
 PRIMARY MARKET:
 Hyderabad
 
-VALID BUSINESS SERVICES:
+CORE IN-HOME SERVICES:
 home care, elderly care, senior care, patient care,
 nursing, nurse at home, home nurse, caretaker,
 care taker, baby care, babysitter, nanny,
@@ -1744,116 +1851,499 @@ harekrishna home care
 hare krishna home care services
 harekrishna home care services
 
-IMPORTANT RULES:
-1. Identify a competitor only when the supplied search term clearly contains
-   another business, agency, hospital, platform, organization or brand name.
-2. Extract the exact competitor/business name visible in the search term.
-3. Never invent a competitor name that is not visible in the supplied term.
-4. Generic service words are NOT competitor names.
-5. Own Harekrishna / Hare Krishna terms are OWN BRAND and protected.
-6. Doctor/home-doctor terms are NOT automatically a valid core service.
-   If no clear brand is present, classify them as AMBIGUOUS or UNRELATED
-   when appropriate rather than automatically KEEP.
-7. Competitor searches should normally be REVIEW, not automatically blocked.
-8. If a competitor term converted, clearly highlight that it may be valuable traffic.
-9. If a competitor term has spend and zero conversions, recommend REVIEW first.
-10. Never invent revenue, impression share, market share or conversion quality.
-11. Use only the supplied search-term data.
+CLASSIFICATION RULES:
+1. COMPETITOR only when the search term clearly contains another
+   business, agency, hospital, clinic, old-age-home facility,
+   nursing-home facility, platform, organization or brand name.
+2. Extract ONLY the exact competitor/business name visibly present
+   in the search term. Never invent or expand a name from outside knowledge.
+3. Generic core-service searches without another brand are GENERIC SERVICE.
+4. Harekrishna / Hare Krishna terms are OWN BRAND and protected.
+5. A named old age home, nursing home, hospital or clinic is a COMPETITOR
+   or alternative-provider business and should normally be REVIEW.
+6. Generic old-age-home, nursing-home, hospital or clinic queries are not
+   the same as the business's core in-home service. Classify them as
+   AMBIGUOUS or UNRELATED when appropriate and normally REVIEW.
+7. Doctor / home-doctor queries are not automatically core services.
+   Without a clear brand, normally use AMBIGUOUS or UNRELATED + REVIEW.
+8. Massage, therapy, physiotherapy and similar non-core services are not
+   automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
+9. Wrong-location searches outside Hyderabad/Telangana should not be
+   automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
+10. Competitor terms should normally be REVIEW, not automatically blocked.
+11. If a competitor term converted, keep the action conservative and note
+    that it may be valuable traffic.
+12. Use ONLY the supplied search-term text and supplied metrics.
+13. Return one result for EVERY supplied Row ID.
 
-SEARCH-TERM CANDIDATES TO ANALYZE:
-These candidates were selected from the FULL selected-period search-term dataset
-using a local brand-likelihood scan. Only up to 15 candidates are sent to AI.
+ALLOWED Type values:
+OWN BRAND
+COMPETITOR
+GENERIC SERVICE
+AMBIGUOUS
+UNRELATED
 
-{competitor_context}
+ALLOWED Recommended Action values:
+KEEP
+REVIEW
+CONSIDER NEGATIVE
 
-Return a concise Markdown table with these columns:
-Search Term | Competitor Name | Campaign | Spend | Clicks | Conversions | Type | Recommended Action | Risk | Reason
+ALLOWED Risk values:
+Low
+Medium
+High
 
-Competitor Name rules:
-- If Type = COMPETITOR, show the exact competitor/business/brand name found in the search term.
-- If no competitor name is clearly present, show —
-- Never turn generic words such as home care, nurse, caretaker, doctor, service, Hyderabad into competitor names.
+INPUT ROWS (maximum 15):
+{batch_context}
 
-Type must be one of:
-OWN BRAND / COMPETITOR / GENERIC SERVICE / AMBIGUOUS / UNRELATED
+RETURN ONLY VALID JSON.
+No Markdown. No code fences. No text before or after the JSON.
 
-Recommended Action must be one of:
-KEEP / REVIEW / CONSIDER NEGATIVE
+Return a JSON array in this exact shape:
+[
+  {{
+    "row_id": 1,
+    "competitor_name": "Exact visible name or —",
+    "type": "COMPETITOR",
+    "recommended_action": "REVIEW",
+    "risk": "Medium",
+    "reason": "Short reason based only on this search term"
+  }}
+]
 
-After the table provide only:
-1. 🏢 Competitor Names Detected
-   - List each unique competitor name found in these terms.
-   - For each name, mention the supplied search term(s), spend, clicks and conversions.
-2. ✅ Competitor Terms That Converted
-3. 💸 Competitor Terms With Spend + Zero Conversions
-4. 🛡 Own Brand Terms Protected
-5. 🎯 Top 3 Competitor Actions
-
-If no real competitor brand is visible in the supplied candidates, say clearly:
-"No clear competitor brand detected in the selected candidate terms."
-
-Keep the answer concise. Never invent competitor names or performance data.
+For non-competitor rows, competitor_name must be "—".
+Keep each reason short.
 """
 
-                            try:
-
-                                with st.spinner(
-                                    "AI is extracting competitor names from selected search terms..."
-                                ):
+                                try:
 
                                     competitor_ai_response = (
                                         openai_client.responses.create(
                                             model="gpt-5.4-mini",
                                             input=competitor_prompt,
-                                            max_output_tokens=1800
+                                            max_output_tokens=2200
                                         )
                                     )
 
-                                competitor_ai_text = (
-                                    competitor_ai_response.output_text
-                                )
+                                    raw_batch_text = (
+                                        competitor_ai_response.output_text
+                                        .strip()
+                                    )
 
-                                st.session_state[
-                                    "competitor_ai_cache_key_v2"
-                                ] = competitor_cache_key
+                                    if raw_batch_text.startswith("```"):
+                                        raw_lines = raw_batch_text.splitlines()
+                                        if raw_lines:
+                                            raw_lines = raw_lines[1:]
+                                        if raw_lines and raw_lines[-1].strip() == "```":
+                                            raw_lines = raw_lines[:-1]
+                                        raw_batch_text = "\n".join(
+                                            raw_lines
+                                        ).strip()
 
-                                st.session_state[
-                                    "competitor_ai_cache_text_v2"
-                                ] = competitor_ai_text
+                                    parsed_batch = json.loads(
+                                        raw_batch_text
+                                    )
 
-                            except Exception as competitor_ai_error:
+                                    if isinstance(parsed_batch, dict):
+                                        parsed_batch = parsed_batch.get(
+                                            "results",
+                                            []
+                                        )
 
-                                competitor_ai_text = None
+                                    if not isinstance(parsed_batch, list):
+                                        raise ValueError(
+                                            "AI response was not a JSON list."
+                                        )
 
-                                st.error(
-                                    "Competitor AI could not run right now. "
-                                    "If this is a rate-limit or credit issue, "
-                                    "wait or add API credit and try again once."
-                                )
+                                    valid_row_ids = set(
+                                        int(value)
+                                        for value in batch_df[
+                                            "Row ID"
+                                        ].tolist()
+                                    )
 
-                                st.caption(
-                                    f"Technical detail: {competitor_ai_error}"
-                                )
+                                    normalized_batch_rows = []
 
-                        if competitor_ai_text:
+                                    for item in parsed_batch:
+                                        if not isinstance(item, dict):
+                                            continue
+
+                                        try:
+                                            row_id = int(
+                                                item.get("row_id")
+                                            )
+                                        except Exception:
+                                            continue
+
+                                        if row_id not in valid_row_ids:
+                                            continue
+
+                                        normalized_batch_rows.append(
+                                            {
+                                                "Row ID": row_id,
+                                                "Competitor Name": str(
+                                                    item.get(
+                                                        "competitor_name",
+                                                        "—"
+                                                    )
+                                                ).strip() or "—",
+                                                "Type": str(
+                                                    item.get(
+                                                        "type",
+                                                        "AMBIGUOUS"
+                                                    )
+                                                ).strip().upper(),
+                                                "Recommended Action": str(
+                                                    item.get(
+                                                        "recommended_action",
+                                                        "REVIEW"
+                                                    )
+                                                ).strip().upper(),
+                                                "Risk": str(
+                                                    item.get(
+                                                        "risk",
+                                                        "Medium"
+                                                    )
+                                                ).strip().title(),
+                                                "Reason": str(
+                                                    item.get(
+                                                        "reason",
+                                                        "Review this term."
+                                                    )
+                                                ).strip()
+                                            }
+                                        )
+
+                                    returned_row_ids = {
+                                        row["Row ID"]
+                                        for row in normalized_batch_rows
+                                    }
+
+                                    missing_row_ids = (
+                                        valid_row_ids - returned_row_ids
+                                    )
+
+                                    if missing_row_ids:
+                                        raise ValueError(
+                                            "AI did not return every Row ID "
+                                            "in this batch."
+                                        )
+
+                                    batch_result_rows = normalized_batch_rows
+
+                                    competitor_batch_cache[
+                                        batch_cache_key
+                                    ] = batch_result_rows
+
+                                    st.session_state[
+                                        "competitor_batch_cache_v3"
+                                    ] = competitor_batch_cache
+
+                                    new_ai_batch_count += 1
+
+                                except Exception as competitor_batch_error:
+
+                                    batch_result_rows = []
+                                    failed_batch_count += 1
+
+                                    st.warning(
+                                        f"Batch {batch_number} could not be "
+                                        "completed. Successful earlier batches "
+                                        "remain cached."
+                                    )
+
+                                    st.caption(
+                                        f"Technical detail: "
+                                        f"{competitor_batch_error}"
+                                    )
+
+                            all_competitor_ai_rows.extend(
+                                batch_result_rows
+                            )
+
+                            competitor_progress.progress(
+                                batch_number / competitor_batch_count
+                            )
+
+                        competitor_status.empty()
+
+                        st.caption(
+                            f"AI batches: {competitor_batch_count} total | "
+                            f"{new_ai_batch_count} new call(s) | "
+                            f"{cached_batch_count} cached | "
+                            f"{failed_batch_count} failed"
+                        )
+
+                        if failed_batch_count == 0:
+                            st.success(
+                                "Full competitor candidate scan completed. "
+                                "All locally detected candidates were analyzed."
+                            )
+                        else:
+                            st.warning(
+                                "Competitor scan is incomplete because one or "
+                                "more batches failed. Run again later; completed "
+                                "batches are cached and will not use AI again."
+                            )
+
+                        if all_competitor_ai_rows:
+
+                            competitor_classification_df = pd.DataFrame(
+                                all_competitor_ai_rows
+                            ).drop_duplicates(
+                                subset=["Row ID"],
+                                keep="last"
+                            )
+
+                            competitor_results_df = competitor_candidate_df.merge(
+                                competitor_classification_df,
+                                on="Row ID",
+                                how="inner"
+                            )
+
+                            competitor_rows_df = competitor_results_df[
+                                competitor_results_df[
+                                    "Type"
+                                ] == "COMPETITOR"
+                            ].copy()
+
+                            competitor_rows_df = competitor_rows_df[
+                                competitor_rows_df[
+                                    "Competitor Name"
+                                ].fillna("—") != "—"
+                            ].copy()
 
                             st.subheader(
-                                "🤖 Competitor Search-Term Analysis"
+                                "🏢 Competitor Names Detected"
                             )
 
-                            st.caption(
-                                "Competitor names are extracted only when a clear "
-                                "brand/business name is visible in the selected "
-                                "search-term candidates."
-                            )
+                            if competitor_rows_df.empty:
 
-                            st.write(competitor_ai_text)
+                                st.info(
+                                    "No clear competitor business name was "
+                                    "detected in the successfully analyzed "
+                                    "candidate terms."
+                                )
+
+                            else:
+
+                                competitor_summary_rows = []
+
+                                for competitor_name, group_df in (
+                                    competitor_rows_df.groupby(
+                                        "Competitor Name",
+                                        dropna=False
+                                    )
+                                ):
+
+                                    search_terms_text = "; ".join(
+                                        sorted(
+                                            set(
+                                                group_df[
+                                                    "Search Term"
+                                                ].astype(str).tolist()
+                                            )
+                                        )
+                                    )
+
+                                    competitor_summary_rows.append(
+                                        {
+                                            "Competitor Name": competitor_name,
+                                            "Search Terms": search_terms_text,
+                                            "Clicks": float(
+                                                group_df["Clicks"].sum()
+                                            ),
+                                            "Spend (₹)": float(
+                                                group_df["Cost (₹)"].sum()
+                                            ),
+                                            "Conversions": float(
+                                                group_df[
+                                                    "Conversions"
+                                                ].sum()
+                                            )
+                                        }
+                                    )
+
+                                competitor_summary_df = pd.DataFrame(
+                                    competitor_summary_rows
+                                ).sort_values(
+                                    "Spend (₹)",
+                                    ascending=False
+                                )
+
+                                result_col1, result_col2, result_col3, result_col4 = (
+                                    st.columns(4)
+                                )
+
+                                with result_col1:
+                                    st.metric(
+                                        "Unique Competitors",
+                                        f"{len(competitor_summary_df):,}"
+                                    )
+
+                                with result_col2:
+                                    st.metric(
+                                        "Competitor Search Terms",
+                                        f"{len(competitor_rows_df):,}"
+                                    )
+
+                                with result_col3:
+                                    st.metric(
+                                        "Competitor Spend",
+                                        f"₹{float(competitor_rows_df['Cost (₹)'].sum()):,.2f}"
+                                    )
+
+                                with result_col4:
+                                    st.metric(
+                                        "Competitor Conversions",
+                                        f"{float(competitor_rows_df['Conversions'].sum()):,.1f}"
+                                    )
+
+                                st.dataframe(
+                                    competitor_summary_df,
+                                    width="stretch",
+                                    hide_index=True
+                                )
+
+                                st.subheader(
+                                    "🔎 Competitor Search Terms"
+                                )
+
+                                competitor_display_columns = [
+                                    "Search Term",
+                                    "Competitor Name"
+                                ]
+
+                                if "Campaign" in competitor_rows_df.columns:
+                                    competitor_display_columns.append(
+                                        "Campaign"
+                                    )
+
+                                competitor_display_columns.extend(
+                                    [
+                                        "Clicks",
+                                        "Cost (₹)",
+                                        "Conversions",
+                                        "Recommended Action",
+                                        "Risk",
+                                        "Reason"
+                                    ]
+                                )
+
+                                st.dataframe(
+                                    competitor_rows_df[
+                                        competitor_display_columns
+                                    ].sort_values(
+                                        "Cost (₹)",
+                                        ascending=False
+                                    ),
+                                    width="stretch",
+                                    hide_index=True
+                                )
+
+                                converted_competitor_df = competitor_rows_df[
+                                    competitor_rows_df[
+                                        "Conversions"
+                                    ] > 0
+                                ]
+
+                                zero_conversion_competitor_df = competitor_rows_df[
+                                    competitor_rows_df[
+                                        "Conversions"
+                                    ] == 0
+                                ]
+
+                                if not converted_competitor_df.empty:
+                                    st.success(
+                                        f"{len(converted_competitor_df):,} "
+                                        "competitor search term(s) converted. "
+                                        "Review carefully before blocking them."
+                                    )
+
+                                if not zero_conversion_competitor_df.empty:
+                                    st.warning(
+                                        f"₹{float(zero_conversion_competitor_df['Cost (₹)'].sum()):,.2f} "
+                                        "was spent on competitor terms with zero "
+                                        "conversions. Review before adding negatives."
+                                    )
+
+                            if not own_brand_df.empty:
+
+                                with st.expander(
+                                    "🛡 Own Brand Terms Protected"
+                                ):
+
+                                    own_brand_display_columns = [
+                                        "Search Term"
+                                    ]
+
+                                    if "Campaign" in own_brand_df.columns:
+                                        own_brand_display_columns.append(
+                                            "Campaign"
+                                        )
+
+                                    own_brand_display_columns.extend(
+                                        [
+                                            "Clicks",
+                                            "Cost (₹)",
+                                            "Conversions"
+                                        ]
+                                    )
+
+                                    st.dataframe(
+                                        own_brand_df[
+                                            own_brand_display_columns
+                                        ],
+                                        width="stretch",
+                                        hide_index=True
+                                    )
+
+                            with st.expander(
+                                "📋 Show All AI-Reviewed Candidate Terms"
+                            ):
+
+                                all_review_columns = [
+                                    "Search Term",
+                                    "Competitor Name"
+                                ]
+
+                                if "Campaign" in competitor_results_df.columns:
+                                    all_review_columns.append("Campaign")
+
+                                all_review_columns.extend(
+                                    [
+                                        "Clicks",
+                                        "Cost (₹)",
+                                        "Conversions",
+                                        "Type",
+                                        "Recommended Action",
+                                        "Risk",
+                                        "Reason"
+                                    ]
+                                )
+
+                                st.dataframe(
+                                    competitor_results_df[
+                                        all_review_columns
+                                    ].sort_values(
+                                        "Cost (₹)",
+                                        ascending=False
+                                    ),
+                                    width="stretch",
+                                    hide_index=True
+                                )
+
+                        else:
+
+                            st.error(
+                                "No competitor AI batch could be completed. "
+                                "Check API credit/rate limits and try again later."
+                            )
 
                 else:
 
                     st.info(
-                        "No search terms with spend are available for "
-                        "competitor analysis."
+                        "No search-term data is available for competitor analysis."
                     )
 
         else:
@@ -1861,6 +2351,7 @@ Keep the answer concise. Never invent competitor names or performance data.
             st.info(
                 "Search term data is not available for competitor analysis."
             )
+
 
         # ==================================================
         # AI DAILY ACTION CENTER
