@@ -690,20 +690,10 @@ try:
             LIMIT 100
         """
 
-        search_response = ga_service.search(
+                search_response = ga_service.search(
             customer_id=customer_id,
             query=search_query
-                # --------------------------
-        # DAILY TREND
-        # --------------------------
-
-        st.subheader("Daily Performance Trend")
-
-        st.line_chart(
-            daily_df[["Clicks", "Conversions"]],
-            width="stretch"
         )
-
         # --------------------------
         # TABLE
         # --------------------------
