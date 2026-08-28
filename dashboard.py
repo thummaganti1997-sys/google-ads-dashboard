@@ -1,8 +1,532 @@
 import streamlit as st
 import pandas as pd
+import hashlib
+import json
+import re
 from datetime import date, timedelta
+from urllib.parse import urlparse
+from uuid import uuid4
 from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
 from openai import OpenAI
+
+
+# ==================================================
+# AI CAMPAIGN BUILDER HELPERS
+# ==================================================
+
+CAMPAIGN_BUILDER_LANGUAGE_IDS = {
+    "English": "1000",
+    "Hindi": "1023",
+    "Telugu": "1131",
+}
+
+CAMPAIGN_BUILDER_PROTECTED_NEGATIVE_PHRASES = (
+    "hare krishna",
+    "harekrishna",
+    "home care",
+    "homecare",
+    "patient care",
+    "elderly care",
+    "nursing care",
+    "nurse at home",
+    "home nurse",
+    "caretaker",
+    "care taker",
+    "caregiver",
+    "baby care",
+    "babysitter",
+    "nanny",
+    "maid",
+    "domestic help",
+    "housekeeping",
+    "cook",
+)
+
+
+def campaign_builder_clip_text(value, limit):
+    """Trim text safely to the requested Google Ads character limit."""
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(value) <= limit:
+        return value
+
+    clipped = value[:limit].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+
+    return clipped or value[:limit].strip()
+
+
+def campaign_builder_dedupe_strings(values, limit, max_items):
+    """Clean, de-duplicate and cap a list of strings."""
+    cleaned = []
+    seen = set()
+
+    for value in values or []:
+        item = campaign_builder_clip_text(value, limit)
+        key = item.casefold()
+
+        if not item or key in seen:
+            continue
+
+        seen.add(key)
+        cleaned.append(item)
+
+        if len(cleaned) >= max_items:
+            break
+
+    return cleaned
+
+
+def campaign_builder_extract_json(text):
+    """Extract the first JSON object from an AI response."""
+    raw = str(text or "").strip()
+
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("AI did not return a valid JSON object.")
+
+    return json.loads(raw[start:end + 1])
+
+
+def campaign_builder_normalize_match_type(value, default="PHRASE"):
+    match_type = str(value or default).strip().upper()
+    if match_type not in {"EXACT", "PHRASE", "BROAD"}:
+        return default
+    return match_type
+
+
+def campaign_builder_clean_keyword_rows(rows, max_items=20, negative=False):
+    """Normalize keyword dictionaries and protect core services from negatives."""
+    cleaned = []
+    seen = set()
+
+    for row in rows or []:
+        if isinstance(row, str):
+            text = row
+            match_type = "PHRASE"
+        elif isinstance(row, dict):
+            text = row.get("text", "")
+            match_type = row.get("match_type", "PHRASE")
+        else:
+            continue
+
+        text = campaign_builder_clip_text(text, 80)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if not text or len(text.split()) > 10:
+            continue
+
+        lower_text = text.casefold()
+
+        if negative and any(
+            protected in lower_text
+            for protected in CAMPAIGN_BUILDER_PROTECTED_NEGATIVE_PHRASES
+        ):
+            continue
+
+        dedupe_key = lower_text
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        cleaned.append(
+            {
+                "text": text,
+                "match_type": campaign_builder_normalize_match_type(
+                    match_type,
+                    default="PHRASE"
+                ),
+            }
+        )
+
+        if len(cleaned) >= max_items:
+            break
+
+    return cleaned
+
+
+def campaign_builder_fallback_headlines(service, location):
+    return campaign_builder_dedupe_strings(
+        [
+            f"{service} At Home",
+            f"{service} {location}",
+            "Home Care Support",
+            "Call For Care Services",
+            "Care At Your Home",
+        ],
+        limit=30,
+        max_items=15,
+    )
+
+
+def campaign_builder_fallback_descriptions(service, location):
+    return campaign_builder_dedupe_strings(
+        [
+            f"Get {service.lower()} support at home in {location}. Call to check availability.",
+            "Home care staff support for families. Enquire now for service availability.",
+        ],
+        limit=90,
+        max_items=4,
+    )
+
+
+def campaign_builder_sanitize_path(value):
+    value = str(value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value[:15]
+
+
+def campaign_builder_sanitize_draft(raw_draft, service, location):
+    """Return a policy-conscious, length-safe campaign draft."""
+    raw_draft = raw_draft if isinstance(raw_draft, dict) else {}
+
+    headlines = campaign_builder_dedupe_strings(
+        raw_draft.get("headlines", []),
+        limit=30,
+        max_items=15,
+    )
+    descriptions = campaign_builder_dedupe_strings(
+        raw_draft.get("descriptions", []),
+        limit=90,
+        max_items=4,
+    )
+
+    for fallback in campaign_builder_fallback_headlines(service, location):
+        if len(headlines) >= 3:
+            break
+        if fallback.casefold() not in {item.casefold() for item in headlines}:
+            headlines.append(fallback)
+
+    for fallback in campaign_builder_fallback_descriptions(service, location):
+        if len(descriptions) >= 2:
+            break
+        if fallback.casefold() not in {item.casefold() for item in descriptions}:
+            descriptions.append(fallback)
+
+    keywords = campaign_builder_clean_keyword_rows(
+        raw_draft.get("keywords", []),
+        max_items=20,
+        negative=False,
+    )
+    negatives = campaign_builder_clean_keyword_rows(
+        raw_draft.get("negative_keywords", []),
+        max_items=15,
+        negative=True,
+    )
+
+    if not keywords:
+        keywords = campaign_builder_clean_keyword_rows(
+            [
+                {"text": f"{service} at home", "match_type": "PHRASE"},
+                {"text": f"{service} services", "match_type": "PHRASE"},
+                {"text": f"{service} {location}", "match_type": "EXACT"},
+            ],
+            max_items=20,
+            negative=False,
+        )
+
+    ad_group_name = campaign_builder_clip_text(
+        raw_draft.get("ad_group_name") or f"{service} - High Intent",
+        255,
+    )
+
+    return {
+        "ad_group_name": ad_group_name,
+        "keywords": keywords,
+        "negative_keywords": negatives,
+        "headlines": headlines[:15],
+        "descriptions": descriptions[:4],
+        "path1": campaign_builder_sanitize_path(
+            raw_draft.get("path1") or service
+        ),
+        "path2": campaign_builder_sanitize_path(
+            raw_draft.get("path2") or location
+        ),
+    }
+
+
+def campaign_builder_parse_keyword_lines(text, negative=False):
+    rows = []
+
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        if "|" in line:
+            keyword_text, match_type = line.rsplit("|", 1)
+        else:
+            keyword_text, match_type = line, "PHRASE"
+
+        rows.append(
+            {
+                "text": keyword_text.strip(),
+                "match_type": match_type.strip(),
+            }
+        )
+
+    return campaign_builder_clean_keyword_rows(
+        rows,
+        max_items=15 if negative else 20,
+        negative=negative,
+    )
+
+
+def campaign_builder_keyword_lines(rows):
+    return "\n".join(
+        f"{row.get('text', '')} | {row.get('match_type', 'PHRASE')}"
+        for row in rows or []
+    )
+
+
+def campaign_builder_valid_url(url):
+    try:
+        parsed = urlparse(str(url or "").strip())
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def campaign_builder_fingerprint(payload):
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def campaign_builder_format_google_ads_error(error):
+    if not isinstance(error, GoogleAdsException):
+        return str(error)
+
+    lines = [f"Request ID: {error.request_id}"]
+
+    for item in error.failure.errors:
+        message = getattr(item, "message", "Google Ads API error")
+        field_names = []
+
+        if getattr(item, "location", None):
+            for element in item.location.field_path_elements:
+                name = getattr(element, "field_name", "")
+                if name:
+                    field_names.append(name)
+
+        if field_names:
+            lines.append(f"{message} (Field: {' > '.join(field_names)})")
+        else:
+            lines.append(message)
+
+    return "\n".join(lines)
+
+
+def campaign_builder_resolve_location(client, location_text):
+    """Resolve a typed Indian location to a Google geo target resource name."""
+    geo_service = client.get_service("GeoTargetConstantService")
+    request = client.get_type("SuggestGeoTargetConstantsRequest")
+    request.locale = "en"
+    request.country_code = "IN"
+    request.location_names.names.append(str(location_text).strip())
+
+    response = geo_service.suggest_geo_target_constants(request=request)
+    suggestions = list(response.geo_target_constant_suggestions)
+
+    if not suggestions:
+        raise ValueError(
+            f"Google Ads could not resolve location: {location_text}"
+        )
+
+    requested = str(location_text).strip().casefold()
+    exact = [
+        item
+        for item in suggestions
+        if str(item.geo_target_constant.name).strip().casefold() == requested
+    ]
+
+    chosen = exact[0] if exact else suggestions[0]
+    geo = chosen.geo_target_constant
+
+    return {
+        "resource_name": geo.resource_name,
+        "name": geo.name,
+        "canonical_name": geo.canonical_name,
+        "target_type": geo.target_type,
+        "country_code": geo.country_code,
+    }
+
+
+def campaign_builder_match_enum(client, match_type):
+    match_type = campaign_builder_normalize_match_type(match_type)
+    mapping = {
+        "EXACT": client.enums.KeywordMatchTypeEnum.EXACT,
+        "PHRASE": client.enums.KeywordMatchTypeEnum.PHRASE,
+        "BROAD": client.enums.KeywordMatchTypeEnum.BROAD,
+    }
+    return mapping[match_type]
+
+
+def campaign_builder_build_operations(client, customer_id, payload):
+    """Build one atomic Search campaign with budget, targeting, keywords and RSA."""
+    operations = []
+
+    budget_service = client.get_service("CampaignBudgetService")
+    campaign_service = client.get_service("CampaignService")
+    ad_group_service = client.get_service("AdGroupService")
+
+    budget_resource = budget_service.campaign_budget_path(customer_id, -1)
+    campaign_resource = campaign_service.campaign_path(customer_id, -2)
+    ad_group_resource = ad_group_service.ad_group_path(customer_id, -3)
+
+    # 1. Campaign budget.
+    mutate = client.get_type("MutateOperation")
+    budget = mutate.campaign_budget_operation.create
+    budget.resource_name = budget_resource
+    budget.name = (
+        f"{payload['campaign_name']} Budget {uuid4().hex[:8]}"
+    )
+    budget.amount_micros = int(round(float(payload["daily_budget"]) * 1_000_000))
+    budget.delivery_method = client.enums.BudgetDeliveryMethodEnum.STANDARD
+    operations.append(mutate)
+
+    # 2. Search campaign - always PAUSED at creation for safety.
+    mutate = client.get_type("MutateOperation")
+    campaign = mutate.campaign_operation.create
+    campaign.resource_name = campaign_resource
+    campaign.name = campaign_builder_clip_text(payload["campaign_name"], 255)
+    campaign.advertising_channel_type = (
+        client.enums.AdvertisingChannelTypeEnum.SEARCH
+    )
+    campaign.status = client.enums.CampaignStatusEnum.PAUSED
+    campaign.campaign_budget = budget_resource
+    campaign.network_settings.target_google_search = True
+    campaign.network_settings.target_search_network = False
+    campaign.network_settings.target_partner_search_network = False
+    campaign.network_settings.target_content_network = False
+    campaign.contains_eu_political_advertising = (
+        client.enums.EuPoliticalAdvertisingStatusEnum.
+        DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
+    )
+
+    if payload["bidding_strategy"] == "Manual CPC":
+        client.copy_from(campaign.manual_cpc, client.get_type("ManualCpc"))
+    else:
+        client.copy_from(
+            campaign.maximize_conversions,
+            client.get_type("MaximizeConversions"),
+        )
+
+    operations.append(mutate)
+
+    # 3. Location targeting.
+    mutate = client.get_type("MutateOperation")
+    criterion = mutate.campaign_criterion_operation.create
+    criterion.campaign = campaign_resource
+    criterion.location.geo_target_constant = payload["location_resource_name"]
+    operations.append(mutate)
+
+    # 4. Language targeting.
+    for language_id in payload["language_ids"]:
+        mutate = client.get_type("MutateOperation")
+        criterion = mutate.campaign_criterion_operation.create
+        criterion.campaign = campaign_resource
+        criterion.language.language_constant = f"languageConstants/{language_id}"
+        operations.append(mutate)
+
+    # 5. Campaign-level negative keywords.
+    for row in payload["negative_keywords"]:
+        mutate = client.get_type("MutateOperation")
+        criterion = mutate.campaign_criterion_operation.create
+        criterion.campaign = campaign_resource
+        criterion.negative = True
+        criterion.keyword.text = row["text"]
+        criterion.keyword.match_type = campaign_builder_match_enum(
+            client,
+            row["match_type"],
+        )
+        operations.append(mutate)
+
+    # 6. Ad group.
+    mutate = client.get_type("MutateOperation")
+    ad_group = mutate.ad_group_operation.create
+    ad_group.resource_name = ad_group_resource
+    ad_group.name = campaign_builder_clip_text(payload["ad_group_name"], 255)
+    ad_group.campaign = campaign_resource
+    ad_group.status = client.enums.AdGroupStatusEnum.ENABLED
+    ad_group.type_ = client.enums.AdGroupTypeEnum.SEARCH_STANDARD
+
+    if payload["bidding_strategy"] == "Manual CPC":
+        ad_group.cpc_bid_micros = int(
+            round(float(payload["manual_cpc_bid"]) * 1_000_000)
+        )
+
+    operations.append(mutate)
+
+    # 7. Positive keywords.
+    for row in payload["keywords"]:
+        mutate = client.get_type("MutateOperation")
+        ad_group_criterion = mutate.ad_group_criterion_operation.create
+        ad_group_criterion.ad_group = ad_group_resource
+        ad_group_criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+        ad_group_criterion.keyword.text = row["text"]
+        ad_group_criterion.keyword.match_type = campaign_builder_match_enum(
+            client,
+            row["match_type"],
+        )
+        operations.append(mutate)
+
+    # 8. Responsive Search Ad.
+    mutate = client.get_type("MutateOperation")
+    ad_group_ad = mutate.ad_group_ad_operation.create
+    ad_group_ad.ad_group = ad_group_resource
+    ad_group_ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
+    ad_group_ad.ad.final_urls.append(payload["final_url"])
+
+    rsa = ad_group_ad.ad.responsive_search_ad
+    headline_assets = []
+    for text in payload["headlines"][:15]:
+        asset = client.get_type("AdTextAsset")
+        asset.text = text
+        headline_assets.append(asset)
+    rsa.headlines.extend(headline_assets)
+
+    description_assets = []
+    for text in payload["descriptions"][:4]:
+        asset = client.get_type("AdTextAsset")
+        asset.text = text
+        description_assets.append(asset)
+    rsa.descriptions.extend(description_assets)
+
+    if payload.get("path1"):
+        rsa.path1 = payload["path1"]
+    if payload.get("path2"):
+        rsa.path2 = payload["path2"]
+
+    operations.append(mutate)
+
+    return operations
+
+
+def campaign_builder_mutate(
+    client,
+    google_ads_service,
+    customer_id,
+    payload,
+    validate_only,
+):
+    """Validate or atomically create the full campaign structure."""
+    request = client.get_type("MutateGoogleAdsRequest")
+    request.customer_id = customer_id
+    request.partial_failure = False
+    request.validate_only = bool(validate_only)
+    request.mutate_operations.extend(
+        campaign_builder_build_operations(client, customer_id, payload)
+    )
+
+    return google_ads_service.mutate(request=request)
 
 
 # ==================================================
@@ -466,7 +990,8 @@ try:
             metrics.impressions,
             metrics.clicks,
             metrics.cost_micros,
-            metrics.conversions
+            metrics.conversions,
+            metrics.phone_calls
         FROM campaign
        WHERE {date_filter_clause}
         
@@ -486,6 +1011,7 @@ try:
         clicks = row.metrics.clicks
         cost = row.metrics.cost_micros / 1_000_000
         conversions = row.metrics.conversions
+        calls = int(row.metrics.phone_calls or 0)
 
         ctr = (
             clicks / impressions * 100
@@ -514,6 +1040,7 @@ try:
             "Clicks": clicks,
             "Cost (₹)": round(cost, 2),
             "Conversions": round(conversions, 2),
+            "Calls": calls,
             "CTR %": round(ctr, 2),
             "Avg CPC (₹)": round(cpc, 2),
             "CPA (₹)": round(cpa, 2),
@@ -544,6 +1071,7 @@ try:
         total_clicks = df["Clicks"].sum()
         total_cost = df["Cost (₹)"].sum()
         total_conversions = df["Conversions"].sum()
+        total_calls = int(df["Calls"].sum()) if "Calls" in df.columns else 0
 
         overall_ctr = (
             total_clicks / total_impressions * 100
@@ -600,6 +1128,11 @@ try:
         selected_clicks = filtered_df["Clicks"].sum()
         selected_cost = filtered_df["Cost (₹)"].sum()
         selected_conversions = filtered_df["Conversions"].sum()
+        selected_calls = (
+            int(filtered_df["Calls"].sum())
+            if "Calls" in filtered_df.columns
+            else 0
+        )
 
         selected_ctr = (
             selected_clicks / selected_impressions * 100
@@ -621,7 +1154,7 @@ try:
             if selected_clicks else 0
         )
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         col1.metric(
             "Impressions",
@@ -634,35 +1167,44 @@ try:
         )
 
         col3.metric(
+            "📞 Calls",
+            f"{selected_calls:,}"
+        )
+
+        col4.metric(
             "Cost",
             f"₹{selected_cost:,.2f}"
         )
 
-        col4.metric(
+        col5.metric(
             "Conversions",
             f"{selected_conversions:.2f}"
         )
 
-        col5, col6, col7, col8 = st.columns(4)
+        col6, col7, col8, col9 = st.columns(4)
 
-        col5.metric(
+        col6.metric(
             "CTR",
             f"{selected_ctr:.2f}%"
         )
 
-        col6.metric(
+        col7.metric(
             "Avg CPC",
             f"₹{selected_cpc:.2f}"
         )
 
-        col7.metric(
+        col8.metric(
             "CPA",
             f"₹{selected_cpa:.2f}"
         )
 
-        col8.metric(
+        col9.metric(
             "Conversion Rate",
             f"{selected_conversion_rate:.2f}%"
+        )
+
+        st.caption(
+            "📞 Calls = Google Ads reported phone calls for the selected campaign/date range."
         )
 
         st.divider()
@@ -774,12 +1316,35 @@ try:
             ]
         )
 
+        # Google Ads exposes phone_calls at campaign level, not in
+        # search_term_view. Keep campaign-level call context in a backend-only
+        # column so zero-conversion search terms from call-producing campaigns
+        # are REVIEWED instead of automatically counted as confirmed waste.
+        campaign_calls_map = (
+            df.set_index("Campaign")["Calls"].to_dict()
+            if "Calls" in df.columns
+            else {}
+        )
+
+        if not search_df.empty:
+            search_df["_Campaign Calls"] = (
+                search_df["Campaign"]
+                .map(campaign_calls_map)
+                .fillna(0)
+                .astype(float)
+            )
+
         st.divider()
         st.header("🔍 Search Terms Analysis")
 
         if not search_df.empty:
+            search_terms_display_df = search_df.drop(
+                columns=["_Campaign Calls"],
+                errors="ignore"
+            )
+
             st.dataframe(
-                search_df,
+                search_terms_display_df,
                 width="stretch",
                 hide_index=True
             )
@@ -896,14 +1461,39 @@ try:
 
         if not search_df.empty:
 
-            waste_df = search_df[
+            zero_conversion_spend_df = search_df[
                 (search_df["Cost (₹)"] > 0)
                 &
                 (search_df["Conversions"] == 0)
             ].copy()
 
+            # Conservative call-aware waste logic:
+            # - Campaign has 0 reported calls -> potential waste candidate.
+            # - Campaign has >0 reported calls -> REVIEW spend, not waste.
+            # Search-term reporting does not expose phone_calls directly, so we
+            # never claim that a specific search term did or did not generate a call.
+            if "_Campaign Calls" in zero_conversion_spend_df.columns:
+                waste_df = zero_conversion_spend_df[
+                    zero_conversion_spend_df["_Campaign Calls"] <= 0
+                ].copy()
+
+                review_spend_df = zero_conversion_spend_df[
+                    zero_conversion_spend_df["_Campaign Calls"] > 0
+                ].copy()
+            else:
+                waste_df = pd.DataFrame(
+                    columns=zero_conversion_spend_df.columns
+                )
+                review_spend_df = zero_conversion_spend_df.copy()
+
             if not waste_df.empty:
                 waste_df = waste_df.sort_values(
+                    "Cost (₹)",
+                    ascending=False
+                )
+
+            if not review_spend_df.empty:
+                review_spend_df = review_spend_df.sort_values(
                     "Cost (₹)",
                     ascending=False
                 )
@@ -913,6 +1503,23 @@ try:
             waste_df = pd.DataFrame(
                 columns=search_df.columns
             )
+
+            review_spend_df = pd.DataFrame(
+                columns=search_df.columns
+            )
+
+        # Keep Waste Risk/Health aligned with the Campaign Filter.
+        if selected_campaign == "All Campaigns":
+            selected_waste_df = waste_df.copy()
+            selected_review_spend_df = review_spend_df.copy()
+        else:
+            selected_waste_df = waste_df[
+                waste_df["Campaign"] == selected_campaign
+            ].copy() if "Campaign" in waste_df.columns else waste_df.copy()
+
+            selected_review_spend_df = review_spend_df[
+                review_spend_df["Campaign"] == selected_campaign
+            ].copy() if "Campaign" in review_spend_df.columns else review_spend_df.copy()
 
 
         # ==================================================
@@ -2062,15 +2669,23 @@ Keep each reason short.
             })
 
 
-        # ZERO / LOW CONVERSIONS
+        # ZERO / LOW CONVERSIONS + CALL-AWARE TRACKING CHECK
         if total_conversions == 0:
 
-            priority_actions.append({
-                "Priority": "🔴 HIGH",
-                "Area": "Conversions",
-                "Problem": "No conversions recorded.",
-                "Action": "Check conversion tracking, search terms, keywords and landing page."
-            })
+            if total_calls > 0:
+                priority_actions.append({
+                    "Priority": "🟠 MEDIUM",
+                    "Area": "Calls vs Conversions",
+                    "Problem": f"0 conversions are recorded, but Google Ads reports {total_calls} calls.",
+                    "Action": "Verify call-conversion tracking before treating the traffic as no-lead traffic."
+                })
+            else:
+                priority_actions.append({
+                    "Priority": "🔴 HIGH",
+                    "Area": "Conversions",
+                    "Problem": "No conversions or reported phone calls recorded.",
+                    "Action": "Check conversion tracking, search terms, keywords and landing page."
+                })
 
         elif overall_conversion_rate < 2:
 
@@ -2093,8 +2708,9 @@ Keep each reason short.
             })
 
 
-        # WASTE SPEND
+        # WASTE SPEND — CALL-AWARE
         daily_waste_amount = 0.0
+        daily_review_amount = 0.0
 
         if "waste_df" in locals() and not waste_df.empty:
 
@@ -2107,10 +2723,19 @@ Keep each reason short.
 
                 priority_actions.append({
                     "Priority": "🔴 HIGH",
-                    "Area": "Waste Spend",
-                    "Problem": f"₹{daily_waste_amount:,.2f} spent with zero conversions.",
-                    "Action": "Review high-spend zero-conversion terms before adding safe negatives."
+                    "Area": "Potential Waste",
+                    "Problem": (
+                        f"₹{daily_waste_amount:,.2f} spent with zero conversions "
+                        "inside campaigns with zero reported calls."
+                    ),
+                    "Action": "Review high-spend terms and add only safe negatives after intent checks."
                 })
+
+        if "review_spend_df" in locals() and not review_spend_df.empty:
+            if "Cost (₹)" in review_spend_df.columns:
+                daily_review_amount = float(
+                    review_spend_df["Cost (₹)"].sum()
+                )
 
 
         # GOOD CTR
@@ -2185,6 +2810,7 @@ Keep each reason short.
                     "Campaign",
                     "Cost (₹)",
                     "Conversions",
+                    "Calls",
                     "CPA (₹)"
                 ]
                 if col in filtered_df.columns
@@ -2272,9 +2898,9 @@ Keep each reason short.
             daily_ai_cache_key = (
                 f"{date_option}|{selected_campaign}|"
                 f"{total_impressions}|{total_clicks}|{total_cost}|"
-                f"{total_conversions}|{overall_ctr}|{overall_cpc}|"
+                f"{total_conversions}|{total_calls}|{overall_ctr}|{overall_cpc}|"
                 f"{overall_cpa}|{overall_conversion_rate}|"
-                f"{daily_waste_amount}|{daily_campaign_context}|"
+                f"{daily_waste_amount}|{daily_review_amount}|{daily_campaign_context}|"
                 f"{daily_search_context}|{daily_priority_context}"
             )
 
@@ -2313,13 +2939,15 @@ SELECTED CAMPAIGN:
 OVERALL KPIs:
 Impressions: {total_impressions}
 Clicks: {total_clicks}
+Calls: {total_calls}
 Cost: ₹{total_cost:.2f}
 Conversions: {total_conversions:.2f}
 CTR: {overall_ctr:.2f}%
 Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
-Zero-conversion spend under review: ₹{daily_waste_amount:.2f}
+Potential waste spend (0 conversions + campaign 0 calls): ₹{daily_waste_amount:.2f}
+Zero-conversion spend in campaigns with calls — REVIEW only: ₹{daily_review_amount:.2f}
 
 TOP 5 CAMPAIGNS BY SPEND:
 {daily_campaign_context}
@@ -2340,7 +2968,9 @@ IMPORTANT RULES:
    maid, domestic help, housekeeping or cook merely because they have zero conversions.
 6. For ambiguous or competitor terms, recommend REVIEW before blocking.
 7. If evidence is weak, say REVIEW instead of making a strong change.
-8. Keep the answer concise and practical.
+8. Calls are available at campaign/account level in this dashboard, not per search term.
+   Never claim that a specific search term generated or did not generate a phone call.
+9. Keep the answer concise and practical.
 
 Return one Markdown table only with these columns:
 Priority | Area | What the Data Shows | Action Today | Expected Purpose | Risk / Check
@@ -2446,6 +3076,7 @@ Priority must be:
                     "Campaign",
                     "Impressions",
                     "Clicks",
+                    "Calls",
                     "Cost (₹)",
                     "Conversions",
                     "CTR %",
@@ -2532,6 +3163,17 @@ Priority must be:
             else:
                 report_waste_amount = 0.0
 
+            if (
+                "review_spend_df" in locals()
+                and not review_spend_df.empty
+                and "Cost (₹)" in review_spend_df.columns
+            ):
+                report_review_amount = float(
+                    review_spend_df["Cost (₹)"].sum()
+                )
+            else:
+                report_review_amount = 0.0
+
             daily_report_prompt = f"""
 You are a senior Google Ads performance analyst.
 
@@ -2543,13 +3185,15 @@ REPORT PERIOD:
 OVERALL KPIs:
 Impressions: {total_impressions}
 Clicks: {total_clicks}
+Calls: {total_calls}
 Cost: ₹{total_cost:.2f}
 Conversions: {total_conversions:.2f}
 CTR: {overall_ctr:.2f}%
 Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
-Potential zero-conversion search-term spend: ₹{report_waste_amount:.2f}
+Potential waste spend (0 conversions + campaign 0 calls): ₹{report_waste_amount:.2f}
+Zero-conversion spend in campaigns with calls — REVIEW only: ₹{report_review_amount:.2f}
 
 TOP CAMPAIGNS BY SPEND (MAX 5):
 {report_campaign_context}
@@ -2559,6 +3203,10 @@ TOP SEARCH TERMS BY SPEND (MAX 10):
 
 TOP PRIORITY SIGNALS (MAX 5):
 {report_priority_context}
+
+IMPORTANT CALL-DATA RULE:
+Calls are campaign/account-level in this dashboard, not search-term-level.
+Never claim a specific search term did or did not generate a phone call.
 
 Create a concise professional report with exactly these sections:
 1. Executive Summary
@@ -2573,8 +3221,9 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
             report_cache_key = (
                 f"v3|{report_period}|{selected_campaign}|"
-                f"{total_impressions}|{total_clicks}|{total_cost:.2f}|"
-                f"{total_conversions:.2f}|{report_campaign_context}|"
+                f"{total_impressions}|{total_clicks}|{total_calls}|{total_cost:.2f}|"
+                f"{total_conversions:.2f}|{report_waste_amount:.2f}|{report_review_amount:.2f}|"
+                f"{report_campaign_context}|"
                 f"{report_search_context}|{report_priority_context}"
             )
 
@@ -2644,6 +3293,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         health_clicks = float(filtered_df["Clicks"].sum()) if "Clicks" in filtered_df.columns else 0
         health_cost = float(filtered_df["Cost (₹)"].sum()) if "Cost (₹)" in filtered_df.columns else 0
         health_conversions = float(filtered_df["Conversions"].sum()) if "Conversions" in filtered_df.columns else 0
+        health_calls = int(filtered_df["Calls"].sum()) if "Calls" in filtered_df.columns else 0
 
         health_ctr = (
             (health_clicks / health_impressions) * 100
@@ -2715,12 +3365,27 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
             else:
                 health_notes.append(f"🟢 CPA is healthy at ₹{health_cpa:.2f}.")
         else:
-            health_score -= 20
-            health_notes.append("🔴 No conversions recorded for the selected data.")
+            if health_calls > 0:
+                health_score -= 10
+                health_notes.append(
+                    f"🟠 No conversions recorded, but Google Ads reports {health_calls} calls. "
+                    "Verify call-conversion tracking before judging lead quality."
+                )
+            else:
+                health_score -= 20
+                health_notes.append(
+                    "🔴 No conversions or reported phone calls recorded for the selected data."
+                )
 
-        # Waste spend
-        if "waste_df" in locals() and not waste_df.empty:
-            waste_amount = float(waste_df["Cost (₹)"].sum())
+        # Calls
+        if health_calls > 0:
+            health_notes.append(
+                f"🟢 Google Ads reports {health_calls} phone calls for the selected data."
+            )
+
+        # Waste spend — call-aware and Campaign Filter aligned
+        if "selected_waste_df" in locals() and not selected_waste_df.empty:
+            waste_amount = float(selected_waste_df["Cost (₹)"].sum())
 
             waste_ratio = (
                 (waste_amount / health_cost) * 100
@@ -2790,6 +3455,12 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
             else 0
         )
 
+        selected_calls = (
+            int(filtered_df["Calls"].sum())
+            if "Calls" in filtered_df.columns
+            else 0
+        )
+
         selected_cpa = (
             selected_spend / selected_conversions
             if selected_conversions > 0
@@ -2797,10 +3468,22 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         )
 
         waste_amount = 0.0
+        review_amount = 0.0
 
-        if "waste_df" in locals() and not waste_df.empty:
-            if "Cost (₹)" in waste_df.columns:
-                waste_amount = float(waste_df["Cost (₹)"].sum())
+        if "selected_waste_df" in locals() and not selected_waste_df.empty:
+            if "Cost (₹)" in selected_waste_df.columns:
+                waste_amount = float(
+                    selected_waste_df["Cost (₹)"].sum()
+                )
+
+        if (
+            "selected_review_spend_df" in locals()
+            and not selected_review_spend_df.empty
+            and "Cost (₹)" in selected_review_spend_df.columns
+        ):
+            review_amount = float(
+                selected_review_spend_df["Cost (₹)"].sum()
+            )
 
         waste_ratio = (
             (waste_amount / selected_spend) * 100
@@ -2828,7 +3511,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
             waste_risk_score = 0
             waste_risk_status = "🟢 Very Low"
 
-        risk_col1, risk_col2, risk_col3 = st.columns(3)
+        risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
 
         with risk_col1:
             st.metric(
@@ -2848,11 +3531,24 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 f"₹{waste_amount:,.2f}"
             )
 
+        with risk_col4:
+            st.metric(
+                "Review Spend",
+                f"₹{review_amount:,.2f}"
+            )
+
         st.progress(waste_risk_score / 100)
 
         st.write(
             f"Potential waste represents **{waste_ratio:.1f}%** "
-            f"of selected spend."
+            f"of selected spend. Google Ads reported calls: **{selected_calls}**."
+        )
+
+        st.caption(
+            "Call-aware safety: a zero-conversion search term is counted as Potential Waste "
+            "only when its campaign has zero Google Ads reported calls. If the campaign has "
+            "calls, that spend is moved to Review Spend because phone_calls is not available "
+            "at individual search-term level."
         )
 
         # -----------------------------
@@ -2862,6 +3558,13 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         st.subheader("💰 Budget Reallocation Suggestions")
 
         budget_actions = []
+
+        if review_amount > 0:
+            budget_actions.append(
+                f"📞 **₹{review_amount:,.2f} is Review Spend, not automatic waste.** "
+                "Those zero-conversion terms belong to campaigns that reported calls, so "
+                "check call quality and call-conversion tracking before blocking them."
+            )
 
         # Critical / high waste = do NOT increase budget
         if waste_ratio >= 20:
@@ -3627,6 +4330,634 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 "Daily performance data is not available."
             )    
         # ==================================================
+        # AI CAMPAIGN BUILDER
+        # ==================================================
+
+        st.divider()
+        st.header("🚀 AI Campaign Builder")
+        st.caption(
+            "AI Draft → Validate Only → Create as PAUSED. "
+            "The campaign cannot serve ads until you manually enable it in Google Ads."
+        )
+
+        campaign_builder_services = [
+            "Elderly Care",
+            "Patient Care",
+            "Nursing Care",
+            "Baby Care",
+            "Caretaker",
+            "Domestic Help / Maid",
+        ]
+
+        builder_col1, builder_col2 = st.columns(2)
+
+        with builder_col1:
+            builder_service = st.selectbox(
+                "Service",
+                campaign_builder_services,
+                key="campaign_builder_service",
+            )
+
+            builder_campaign_name = st.text_input(
+                "Campaign Name",
+                value=f"HK | {builder_service} | Hyderabad | Search",
+                key="campaign_builder_campaign_name",
+            )
+
+            builder_daily_budget = st.number_input(
+                "Daily Budget (₹)",
+                min_value=100.0,
+                max_value=100000.0,
+                value=1500.0,
+                step=100.0,
+                key="campaign_builder_daily_budget",
+            )
+
+            builder_location = st.text_input(
+                "Target Location",
+                value="Hyderabad",
+                key="campaign_builder_location",
+            )
+
+        with builder_col2:
+            builder_languages = st.multiselect(
+                "Languages",
+                list(CAMPAIGN_BUILDER_LANGUAGE_IDS.keys()),
+                default=["English"],
+                key="campaign_builder_languages",
+            )
+
+            builder_bidding = st.selectbox(
+                "Bidding Strategy",
+                ["Maximize Conversions", "Manual CPC"],
+                index=0,
+                key="campaign_builder_bidding",
+            )
+
+            if builder_bidding == "Manual CPC":
+                builder_manual_cpc = st.number_input(
+                    "Max CPC Bid (₹)",
+                    min_value=1.0,
+                    max_value=10000.0,
+                    value=50.0,
+                    step=5.0,
+                    key="campaign_builder_manual_cpc",
+                )
+            else:
+                builder_manual_cpc = 0.0
+
+            builder_final_url = st.text_input(
+                "Final URL",
+                value="https://hareekrishna.com/",
+                key="campaign_builder_final_url",
+            )
+
+        st.info(
+            "Safety: AI generation only creates a draft. "
+            "Validate Only makes no Google Ads changes. "
+            "Actual creation always creates the campaign as PAUSED."
+        )
+
+        generate_builder_draft = st.button(
+            "✨ Generate AI Campaign Draft",
+            key="generate_ai_campaign_builder_draft",
+            width="stretch",
+        )
+
+        if generate_builder_draft:
+            builder_input_errors = []
+
+            if not builder_campaign_name.strip():
+                builder_input_errors.append("Campaign Name is required.")
+
+            if not builder_location.strip():
+                builder_input_errors.append("Target Location is required.")
+
+            if not builder_languages:
+                builder_input_errors.append("Select at least one language.")
+
+            if not campaign_builder_valid_url(builder_final_url):
+                builder_input_errors.append(
+                    "Enter a valid Final URL starting with http:// or https://."
+                )
+
+            if builder_input_errors:
+                for builder_error in builder_input_errors:
+                    st.error(builder_error)
+            else:
+                builder_ai_prompt = f"""
+You are a Google Ads Search campaign builder for a home-care services business.
+
+Return ONLY one valid JSON object. Do not use markdown fences.
+
+CAMPAIGN GOAL:
+- Generate qualified phone-call and lead intent.
+- Service: {builder_service}
+- Location: {builder_location}
+- Languages: {', '.join(builder_languages)}
+- Final URL: {builder_final_url}
+
+BUSINESS SERVICES:
+- Home Care
+- Elderly Care
+- Patient Care
+- Nursing Care
+- Baby Care / Babysitter / Nanny
+- Caretaker / Caregiver
+- Domestic Help / Maid / Housekeeping / Cook
+
+OWN BRAND - NEVER SUGGEST AS A NEGATIVE:
+- Hare Krishna
+- Harekrishna
+- Harekrishna Home Care Services
+
+REQUIREMENTS:
+- One tightly themed Search ad group for the selected service.
+- 12 to 20 high-intent keywords.
+- Prefer PHRASE and EXACT match. Use BROAD only when clearly justified.
+- Do not add unrelated or informational keywords.
+- Negative keywords must be only clearly irrelevant intent such as jobs,
+  vacancies, salary, course, training, free, PDF, meaning, definition, etc.
+- Do not make any offered service or own brand a negative keyword.
+- Create 10 to 15 unique RSA headlines, each <= 30 characters.
+- Create 3 to 4 unique RSA descriptions, each <= 90 characters.
+- Avoid unverifiable claims such as #1, guaranteed, cheapest, best in India.
+- Use practical call/lead intent without promising unavailable staff.
+- path1 and path2 must be lowercase URL path words, <= 15 characters each.
+
+JSON SCHEMA:
+{{
+  "ad_group_name": "string",
+  "keywords": [
+    {{"text": "keyword", "match_type": "PHRASE"}}
+  ],
+  "negative_keywords": [
+    {{"text": "negative", "match_type": "PHRASE"}}
+  ],
+  "headlines": ["headline"],
+  "descriptions": ["description"],
+  "path1": "string",
+  "path2": "string"
+}}
+"""
+
+                builder_ai_cache_key = campaign_builder_fingerprint(
+                    {
+                        "service": builder_service,
+                        "location": builder_location,
+                        "languages": builder_languages,
+                        "final_url": builder_final_url,
+                    }
+                )
+
+                try:
+                    if (
+                        st.session_state.get("campaign_builder_ai_cache_key")
+                        == builder_ai_cache_key
+                        and st.session_state.get("campaign_builder_ai_cache_draft")
+                    ):
+                        builder_draft = st.session_state[
+                            "campaign_builder_ai_cache_draft"
+                        ]
+                        st.success(
+                            "Saved AI draft reused for the same setup. "
+                            "No new OpenAI call was used."
+                        )
+                    else:
+                        with st.spinner("AI is building the campaign draft..."):
+                            builder_ai_response = openai_client.responses.create(
+                                model="gpt-5.4-mini",
+                                input=builder_ai_prompt,
+                                max_output_tokens=2200,
+                            )
+
+                        raw_builder_draft = campaign_builder_extract_json(
+                            builder_ai_response.output_text
+                        )
+                        builder_draft = campaign_builder_sanitize_draft(
+                            raw_builder_draft,
+                            builder_service,
+                            builder_location,
+                        )
+
+                        st.session_state[
+                            "campaign_builder_ai_cache_key"
+                        ] = builder_ai_cache_key
+                        st.session_state[
+                            "campaign_builder_ai_cache_draft"
+                        ] = builder_draft
+
+                    st.session_state["campaign_builder_draft"] = builder_draft
+                    st.session_state.pop(
+                        "campaign_builder_validated_fingerprint",
+                        None,
+                    )
+                    st.session_state.pop(
+                        "campaign_builder_validated_location",
+                        None,
+                    )
+
+                    for edit_key in [
+                        "campaign_builder_ad_group_edit",
+                        "campaign_builder_keywords_edit",
+                        "campaign_builder_negatives_edit",
+                        "campaign_builder_headlines_edit",
+                        "campaign_builder_descriptions_edit",
+                        "campaign_builder_path1_edit",
+                        "campaign_builder_path2_edit",
+                    ]:
+                        st.session_state.pop(edit_key, None)
+
+                    st.rerun()
+
+                except Exception as builder_ai_error:
+                    st.error(
+                        "AI campaign draft could not be generated. "
+                        f"Technical detail: {builder_ai_error}"
+                    )
+
+        builder_draft = st.session_state.get("campaign_builder_draft")
+
+        if builder_draft:
+            st.subheader("📝 Review & Edit AI Draft")
+
+            builder_ad_group_name = st.text_input(
+                "Ad Group Name",
+                value=builder_draft["ad_group_name"],
+                key="campaign_builder_ad_group_edit",
+            )
+
+            edit_col1, edit_col2 = st.columns(2)
+
+            with edit_col1:
+                builder_keyword_text = st.text_area(
+                    "Keywords — one per line: keyword | MATCH_TYPE",
+                    value=campaign_builder_keyword_lines(
+                        builder_draft["keywords"]
+                    ),
+                    height=280,
+                    key="campaign_builder_keywords_edit",
+                )
+
+                builder_negative_text = st.text_area(
+                    "Negative Keywords — one per line: keyword | MATCH_TYPE",
+                    value=campaign_builder_keyword_lines(
+                        builder_draft["negative_keywords"]
+                    ),
+                    height=220,
+                    key="campaign_builder_negatives_edit",
+                )
+
+            with edit_col2:
+                builder_headlines_text = st.text_area(
+                    "RSA Headlines — one per line (max 30 chars)",
+                    value="\n".join(builder_draft["headlines"]),
+                    height=280,
+                    key="campaign_builder_headlines_edit",
+                )
+
+                builder_descriptions_text = st.text_area(
+                    "RSA Descriptions — one per line (max 90 chars)",
+                    value="\n".join(builder_draft["descriptions"]),
+                    height=220,
+                    key="campaign_builder_descriptions_edit",
+                )
+
+            path_col1, path_col2 = st.columns(2)
+
+            with path_col1:
+                builder_path1 = st.text_input(
+                    "Display Path 1",
+                    value=builder_draft.get("path1", ""),
+                    key="campaign_builder_path1_edit",
+                )
+
+            with path_col2:
+                builder_path2 = st.text_input(
+                    "Display Path 2",
+                    value=builder_draft.get("path2", ""),
+                    key="campaign_builder_path2_edit",
+                )
+
+            current_builder_draft = campaign_builder_sanitize_draft(
+                {
+                    "ad_group_name": builder_ad_group_name,
+                    "keywords": campaign_builder_parse_keyword_lines(
+                        builder_keyword_text,
+                        negative=False,
+                    ),
+                    "negative_keywords": campaign_builder_parse_keyword_lines(
+                        builder_negative_text,
+                        negative=True,
+                    ),
+                    "headlines": [
+                        line.strip()
+                        for line in builder_headlines_text.splitlines()
+                        if line.strip()
+                    ],
+                    "descriptions": [
+                        line.strip()
+                        for line in builder_descriptions_text.splitlines()
+                        if line.strip()
+                    ],
+                    "path1": builder_path1,
+                    "path2": builder_path2,
+                },
+                builder_service,
+                builder_location,
+            )
+
+            builder_core_payload = {
+                "service": builder_service,
+                "campaign_name": campaign_builder_clip_text(
+                    builder_campaign_name,
+                    255,
+                ),
+                "daily_budget": float(builder_daily_budget),
+                "location_text": builder_location.strip(),
+                "languages": sorted(builder_languages),
+                "language_ids": [
+                    CAMPAIGN_BUILDER_LANGUAGE_IDS[name]
+                    for name in sorted(builder_languages)
+                ],
+                "bidding_strategy": builder_bidding,
+                "manual_cpc_bid": float(builder_manual_cpc),
+                "final_url": builder_final_url.strip(),
+                "ad_group_name": current_builder_draft["ad_group_name"],
+                "keywords": current_builder_draft["keywords"],
+                "negative_keywords": current_builder_draft[
+                    "negative_keywords"
+                ],
+                "headlines": current_builder_draft["headlines"],
+                "descriptions": current_builder_draft["descriptions"],
+                "path1": current_builder_draft["path1"],
+                "path2": current_builder_draft["path2"],
+            }
+
+            builder_current_fingerprint = campaign_builder_fingerprint(
+                builder_core_payload
+            )
+
+            st.subheader("🔎 Campaign Preview")
+
+            preview_settings = pd.DataFrame(
+                [
+                    ["Campaign", builder_core_payload["campaign_name"]],
+                    ["Status", "PAUSED"],
+                    ["Service", builder_service],
+                    ["Daily Budget", f"₹{builder_daily_budget:,.2f}"],
+                    ["Location", builder_location],
+                    ["Languages", ", ".join(builder_languages)],
+                    ["Bidding", builder_bidding],
+                    ["Final URL", builder_final_url],
+                    ["Ad Group", builder_core_payload["ad_group_name"]],
+                    ["Keywords", len(builder_core_payload["keywords"])],
+                    [
+                        "Negative Keywords",
+                        len(builder_core_payload["negative_keywords"]),
+                    ],
+                    ["Headlines", len(builder_core_payload["headlines"])],
+                    [
+                        "Descriptions",
+                        len(builder_core_payload["descriptions"]),
+                    ],
+                ],
+                columns=["Setting", "Value"],
+            )
+            st.dataframe(preview_settings, hide_index=True, width="stretch")
+
+            preview_col1, preview_col2 = st.columns(2)
+
+            with preview_col1:
+                st.markdown("**Keywords**")
+                st.dataframe(
+                    pd.DataFrame(builder_core_payload["keywords"]),
+                    hide_index=True,
+                    width="stretch",
+                )
+
+                st.markdown("**Negative Keywords**")
+                if builder_core_payload["negative_keywords"]:
+                    st.dataframe(
+                        pd.DataFrame(
+                            builder_core_payload["negative_keywords"]
+                        ),
+                        hide_index=True,
+                        width="stretch",
+                    )
+                else:
+                    st.caption("No campaign-level negative keywords in this draft.")
+
+            with preview_col2:
+                st.markdown("**Responsive Search Ad**")
+                st.write("Headlines:")
+                for headline in builder_core_payload["headlines"]:
+                    st.write(f"• {headline}")
+
+                st.write("Descriptions:")
+                for description in builder_core_payload["descriptions"]:
+                    st.write(f"• {description}")
+
+            builder_validation_errors = []
+
+            if not builder_core_payload["campaign_name"]:
+                builder_validation_errors.append("Campaign Name is required.")
+
+            if not campaign_builder_valid_url(builder_core_payload["final_url"]):
+                builder_validation_errors.append("Final URL is invalid.")
+
+            if not builder_languages:
+                builder_validation_errors.append("Select at least one language.")
+
+            if len(builder_core_payload["keywords"]) < 1:
+                builder_validation_errors.append("At least one keyword is required.")
+
+            if len(builder_core_payload["headlines"]) < 3:
+                builder_validation_errors.append(
+                    "Responsive Search Ad requires at least 3 headlines."
+                )
+
+            if len(builder_core_payload["descriptions"]) < 2:
+                builder_validation_errors.append(
+                    "Responsive Search Ad requires at least 2 descriptions."
+                )
+
+            if builder_validation_errors:
+                for builder_error in builder_validation_errors:
+                    st.error(builder_error)
+
+            validate_campaign_button = st.button(
+                "🧪 Validate Full Campaign — No Changes",
+                key="validate_ai_campaign_builder",
+                disabled=bool(builder_validation_errors),
+                width="stretch",
+            )
+
+            if validate_campaign_button:
+                try:
+                    with st.spinner(
+                        "Resolving location and validating the full Google Ads campaign..."
+                    ):
+                        resolved_location = campaign_builder_resolve_location(
+                            client,
+                            builder_location,
+                        )
+
+                        validated_payload = dict(builder_core_payload)
+                        validated_payload["location_resource_name"] = (
+                            resolved_location["resource_name"]
+                        )
+
+                        campaign_builder_mutate(
+                            client,
+                            ga_service,
+                            customer_id,
+                            validated_payload,
+                            validate_only=True,
+                        )
+
+                    st.session_state[
+                        "campaign_builder_validated_fingerprint"
+                    ] = builder_current_fingerprint
+                    st.session_state[
+                        "campaign_builder_validated_location"
+                    ] = resolved_location
+
+                    st.success(
+                        "✅ VALIDATION PASS — Google Ads accepted the full request. "
+                        "Nothing was created."
+                    )
+                    st.caption(
+                        "Resolved location: "
+                        f"{resolved_location.get('canonical_name') or resolved_location.get('name')}"
+                    )
+
+                except Exception as builder_validate_error:
+                    st.session_state.pop(
+                        "campaign_builder_validated_fingerprint",
+                        None,
+                    )
+                    st.session_state.pop(
+                        "campaign_builder_validated_location",
+                        None,
+                    )
+                    st.error("❌ VALIDATION FAILED")
+                    st.code(
+                        campaign_builder_format_google_ads_error(
+                            builder_validate_error
+                        )
+                    )
+
+            validated_fingerprint = st.session_state.get(
+                "campaign_builder_validated_fingerprint"
+            )
+            validation_is_current = (
+                validated_fingerprint == builder_current_fingerprint
+            )
+
+            if validation_is_current:
+                st.success(
+                    "✅ Current draft is validated and ready for PAUSED creation."
+                )
+            elif validated_fingerprint:
+                st.warning(
+                    "Draft settings changed after validation. "
+                    "Run Validate Full Campaign again before creating."
+                )
+            else:
+                st.caption(
+                    "Run Validate Full Campaign first. "
+                    "Create stays locked until validation passes."
+                )
+
+            builder_confirm_create = st.checkbox(
+                "I confirm: create this campaign in Google Ads as PAUSED.",
+                key="campaign_builder_confirm_create",
+            )
+
+            create_campaign_button = st.button(
+                "🚀 Create PAUSED Campaign in Google Ads",
+                key="create_ai_campaign_builder",
+                disabled=(
+                    bool(builder_validation_errors)
+                    or not validation_is_current
+                    or not builder_confirm_create
+                ),
+                width="stretch",
+            )
+
+            if create_campaign_button:
+                try:
+                    validated_location = st.session_state.get(
+                        "campaign_builder_validated_location"
+                    )
+
+                    if not validated_location:
+                        raise ValueError(
+                            "Validated location is missing. Please validate again."
+                        )
+
+                    create_payload = dict(builder_core_payload)
+                    create_payload["location_resource_name"] = (
+                        validated_location["resource_name"]
+                    )
+
+                    with st.spinner(
+                        "Creating budget, PAUSED campaign, targeting, ad group, "
+                        "keywords and responsive search ad..."
+                    ):
+                        create_response = campaign_builder_mutate(
+                            client,
+                            ga_service,
+                            customer_id,
+                            create_payload,
+                            validate_only=False,
+                        )
+
+                    campaign_resource_name = (
+                        create_response.mutate_operation_responses[1]
+                        .campaign_result.resource_name
+                    )
+                    campaign_id = campaign_resource_name.rsplit("/", 1)[-1]
+
+                    st.session_state[
+                        "campaign_builder_last_created_campaign_id"
+                    ] = campaign_id
+                    st.session_state[
+                        "campaign_builder_last_created_resource"
+                    ] = campaign_resource_name
+                    st.session_state.pop(
+                        "campaign_builder_validated_fingerprint",
+                        None,
+                    )
+                    st.session_state.pop(
+                        "campaign_builder_validated_location",
+                        None,
+                    )
+                    st.success(
+                        "✅ Campaign created successfully as PAUSED. "
+                        f"Google Ads Campaign ID: {campaign_id}"
+                    )
+                    st.warning(
+                        "Do not enable it until you review budget, location, "
+                        "keywords, negatives, ad copy and conversion settings in Google Ads."
+                    )
+
+                except Exception as builder_create_error:
+                    st.error("❌ Campaign creation failed. No partial campaign should be created because the request is atomic.")
+                    st.code(
+                        campaign_builder_format_google_ads_error(
+                            builder_create_error
+                        )
+                    )
+
+        else:
+            st.caption(
+                "Choose the campaign settings above and click "
+                "Generate AI Campaign Draft."
+            )
+
+        # ==================================================
         # ASK AI
         # ==================================================
 
@@ -4073,6 +5404,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                             "Campaign",
                             "Impressions",
                             "Clicks",
+                            "Calls",
                             "Cost (₹)",
                             "Conversions",
                             "CTR %",
@@ -4125,6 +5457,9 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         - Answer only for that period.
         - Do not present campaign-vs-account performance as Before vs After.
         - Use BEFORE VS AFTER DATA only when actual comparison data is available.
+        - Calls are campaign/account-level in this dashboard, not search-term-level.
+        - Never claim that a specific Search Term generated or did not generate a phone call.
+        - If conversions are zero but Calls are greater than zero, recommend checking call-conversion tracking before labeling traffic as no-lead traffic.
 
         ADVERTISER SERVICES:
         - Home Care
@@ -4200,6 +5535,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         OVERALL METRICS:
         Impressions: {total_impressions}
         Clicks: {total_clicks}
+        Calls: {total_calls}
         Cost: ₹{total_cost:.2f}
         Conversions: {total_conversions:.2f}
         CTR: {overall_ctr:.2f}%
@@ -4218,7 +5554,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                     # ==================================================
 
                     ask_ai_cache_key = (
-                        f"v3|{current_ai_period}|{selected_campaign}|"
+                        f"v4|{current_ai_period}|{selected_campaign}|{total_calls}|"
                         f"{question}|{ask_campaign_context}|"
                         f"{search_terms_context}|{before_after_context}"
                     )
