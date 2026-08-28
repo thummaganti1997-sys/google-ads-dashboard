@@ -1154,6 +1154,28 @@ try:
             if selected_clicks else 0
         )
 
+        # ==================================================
+        # UNIFIED ANALYSIS SCOPE
+        # ==================================================
+        # Every downstream intelligence section must follow the Campaign Filter.
+        # Reuse the existing total/overall variable names so AI Daily Actions,
+        # AI Report and Ask AI cannot accidentally fall back to account-wide KPIs.
+        total_impressions = selected_impressions
+        total_clicks = selected_clicks
+        total_cost = selected_cost
+        total_conversions = selected_conversions
+        total_calls = selected_calls
+        overall_ctr = selected_ctr
+        overall_cpc = selected_cpc
+        overall_cpa = selected_cpa
+        overall_conversion_rate = selected_conversion_rate
+
+        analysis_scope_label = (
+            "All Campaigns"
+            if selected_campaign == "All Campaigns"
+            else f"Campaign: {selected_campaign}"
+        )
+
         col1, col2, col3, col4, col5 = st.columns(5)
 
         col1.metric(
@@ -1334,8 +1356,18 @@ try:
                 .astype(float)
             )
 
+            # Keep Search Terms and every downstream search-term intelligence
+            # section aligned with the Campaign Filter.
+            if selected_campaign != "All Campaigns":
+                search_df = search_df[
+                    search_df["Campaign"] == selected_campaign
+                ].copy()
+            else:
+                search_df = search_df.copy()
+
         st.divider()
         st.header("🔍 Search Terms Analysis")
+        st.caption(f"Scope: {analysis_scope_label}")
 
         if not search_df.empty:
             search_terms_display_df = search_df.drop(
@@ -1363,11 +1395,12 @@ try:
         daily_query = f"""
             SELECT
                 segments.date,
+                campaign.name,
                 metrics.impressions,
                 metrics.clicks,
                 metrics.cost_micros,
                 metrics.conversions
-            FROM customer
+            FROM campaign
             WHERE {date_filter_clause}
             ORDER BY segments.date
         """
@@ -1380,68 +1413,110 @@ try:
         daily_data = []
 
         for row in daily_response:
-            daily_impressions = int(row.metrics.impressions or 0)
-            daily_clicks = int(row.metrics.clicks or 0)
-            daily_cost = float(row.metrics.cost_micros or 0) / 1_000_000
-            daily_conversions = float(row.metrics.conversions or 0)
-
-            daily_ctr = (
-                daily_clicks / daily_impressions * 100
-                if daily_impressions > 0
-                else 0
-            )
-
-            daily_cpc = (
-                daily_cost / daily_clicks
-                if daily_clicks > 0
-                else 0
-            )
-
-            daily_cpa = (
-                daily_cost / daily_conversions
-                if daily_conversions > 0
-                else 0
-            )
-
             daily_data.append({
                 "Date": str(row.segments.date),
-                "Impressions": daily_impressions,
-                "Clicks": daily_clicks,
-                "Cost": round(daily_cost, 2),
-                "Conversions": round(daily_conversions, 2),
-                "CTR": round(daily_ctr, 2),
-                "CPC": round(daily_cpc, 2),
-                "CPA": round(daily_cpa, 2)
+                "Campaign": row.campaign.name,
+                "Impressions": int(row.metrics.impressions or 0),
+                "Clicks": int(row.metrics.clicks or 0),
+                "Cost": float(row.metrics.cost_micros or 0) / 1_000_000,
+                "Conversions": float(row.metrics.conversions or 0)
             })
 
-        daily_df = pd.DataFrame(
+        daily_raw_df = pd.DataFrame(
             daily_data,
             columns=[
                 "Date",
+                "Campaign",
                 "Impressions",
                 "Clicks",
                 "Cost",
-                "Conversions",
-                "CTR",
-                "CPC",
-                "CPA"
+                "Conversions"
             ]
         )
 
-        if not daily_df.empty:
-            daily_df["Date"] = pd.to_datetime(
-                daily_df["Date"],
+        if not daily_raw_df.empty:
+            daily_raw_df["Date"] = pd.to_datetime(
+                daily_raw_df["Date"],
                 errors="coerce"
             )
 
-            daily_df = (
-                daily_df
-                .dropna(subset=["Date"])
-                .sort_values("Date")
-                .set_index("Date")
+            daily_raw_df = daily_raw_df.dropna(subset=["Date"])
+
+            if selected_campaign != "All Campaigns":
+                daily_raw_df = daily_raw_df[
+                    daily_raw_df["Campaign"] == selected_campaign
+                ].copy()
+
+            # Aggregate after filtering so all downstream trend and
+            # Before-vs-After calculations use exactly the selected scope.
+            if not daily_raw_df.empty:
+                daily_df = (
+                    daily_raw_df
+                    .groupby("Date", as_index=False)[
+                        [
+                            "Impressions",
+                            "Clicks",
+                            "Cost",
+                            "Conversions"
+                        ]
+                    ]
+                    .sum()
+                    .sort_values("Date")
+                )
+
+                daily_df["CTR"] = daily_df.apply(
+                    lambda row: (
+                        row["Clicks"] / row["Impressions"] * 100
+                        if row["Impressions"] > 0 else 0
+                    ),
+                    axis=1
+                )
+
+                daily_df["CPC"] = daily_df.apply(
+                    lambda row: (
+                        row["Cost"] / row["Clicks"]
+                        if row["Clicks"] > 0 else 0
+                    ),
+                    axis=1
+                )
+
+                daily_df["CPA"] = daily_df.apply(
+                    lambda row: (
+                        row["Cost"] / row["Conversions"]
+                        if row["Conversions"] > 0 else 0
+                    ),
+                    axis=1
+                )
+
+                daily_df = daily_df.set_index("Date")
+            else:
+                daily_df = pd.DataFrame(
+                    columns=[
+                        "Impressions",
+                        "Clicks",
+                        "Cost",
+                        "Conversions",
+                        "CTR",
+                        "CPC",
+                        "CPA"
+                    ]
+                )
+        else:
+            daily_df = pd.DataFrame(
+                columns=[
+                    "Impressions",
+                    "Clicks",
+                    "Cost",
+                    "Conversions",
+                    "CTR",
+                    "CPC",
+                    "CPA"
+                ]
             )
 
+        if not daily_df.empty:
             st.subheader("Daily Performance Trend")
+            st.caption(f"Scope: {analysis_scope_label}")
 
             st.line_chart(
                 daily_df[["Clicks", "Conversions"]],
@@ -1450,7 +1525,7 @@ try:
 
         else:
             st.info(
-                "No daily performance data available for the selected date range."
+                "No daily performance data available for the selected campaign/date range."
             )
 
         # ==================================================
@@ -1467,24 +1542,55 @@ try:
                 (search_df["Conversions"] == 0)
             ].copy()
 
-            # Conservative call-aware waste logic:
-            # - Campaign has 0 reported calls -> potential waste candidate.
-            # - Campaign has >0 reported calls -> REVIEW spend, not waste.
-            # Search-term reporting does not expose phone_calls directly, so we
-            # never claim that a specific search term did or did not generate a call.
-            if "_Campaign Calls" in zero_conversion_spend_df.columns:
+            # Search-term phone_calls are not available directly. Therefore
+            # campaign calls are supporting context only and never automatic
+            # proof that every zero-conversion term produced a lead.
+            # Potential Waste is intentionally limited to CLEAR irrelevant intent.
+            clear_irrelevant_patterns = [
+                r"\bjobs?\b",
+                r"\bvacanc(?:y|ies)\b",
+                r"\bcareer(?:s)?\b",
+                r"\bsalar(?:y|ies)\b",
+                r"\brecruit(?:ment|er|ers|ing)?\b",
+                r"\bresume\b",
+                r"\bcv\b",
+                r"\bcourses?\b",
+                r"\btraining\b",
+                r"\binstitute\b",
+                r"\bcertification\b",
+                r"\bsyllabus\b",
+                r"\bexams?\b",
+                r"\bmeaning\b",
+                r"\bdefinition\b",
+                r"\bpdf\b"
+            ]
+
+            def has_clear_irrelevant_intent(term):
+                term_text = str(term or "").casefold()
+                return any(
+                    re.search(pattern, term_text)
+                    for pattern in clear_irrelevant_patterns
+                )
+
+            if not zero_conversion_spend_df.empty:
+                irrelevant_mask = zero_conversion_spend_df[
+                    "Search Term"
+                ].apply(has_clear_irrelevant_intent)
+
                 waste_df = zero_conversion_spend_df[
-                    zero_conversion_spend_df["_Campaign Calls"] <= 0
+                    irrelevant_mask
                 ].copy()
 
                 review_spend_df = zero_conversion_spend_df[
-                    zero_conversion_spend_df["_Campaign Calls"] > 0
+                    ~irrelevant_mask
                 ].copy()
             else:
                 waste_df = pd.DataFrame(
                     columns=zero_conversion_spend_df.columns
                 )
-                review_spend_df = zero_conversion_spend_df.copy()
+                review_spend_df = pd.DataFrame(
+                    columns=zero_conversion_spend_df.columns
+                )
 
             if not waste_df.empty:
                 waste_df = waste_df.sort_values(
@@ -2645,6 +2751,7 @@ Keep each reason short.
 
         st.divider()
         st.header("🎯 AI Daily Action Center")
+        st.caption(f"Scope: {analysis_scope_label}")
 
         st.caption(
             "Shows immediate priority signals from the selected data and, "
@@ -2712,11 +2819,11 @@ Keep each reason short.
         daily_waste_amount = 0.0
         daily_review_amount = 0.0
 
-        if "waste_df" in locals() and not waste_df.empty:
+        if "selected_waste_df" in locals() and not selected_waste_df.empty:
 
-            if "Cost (₹)" in waste_df.columns:
+            if "Cost (₹)" in selected_waste_df.columns:
                 daily_waste_amount = float(
-                    waste_df["Cost (₹)"].sum()
+                    selected_waste_df["Cost (₹)"].sum()
                 )
 
             if daily_waste_amount > 500:
@@ -2726,15 +2833,15 @@ Keep each reason short.
                     "Area": "Potential Waste",
                     "Problem": (
                         f"₹{daily_waste_amount:,.2f} spent with zero conversions "
-                        "inside campaigns with zero reported calls."
+                        "on search terms showing clear irrelevant intent."
                     ),
                     "Action": "Review high-spend terms and add only safe negatives after intent checks."
                 })
 
-        if "review_spend_df" in locals() and not review_spend_df.empty:
-            if "Cost (₹)" in review_spend_df.columns:
+        if "selected_review_spend_df" in locals() and not selected_review_spend_df.empty:
+            if "Cost (₹)" in selected_review_spend_df.columns:
                 daily_review_amount = float(
-                    review_spend_df["Cost (₹)"].sum()
+                    selected_review_spend_df["Cost (₹)"].sum()
                 )
 
 
@@ -2885,7 +2992,7 @@ Keep each reason short.
         # --------------------------------------------------
 
         st.info(
-            "AI uses only overall KPIs + Top 5 campaigns + Top 10 highest-spend "
+            "AI uses only selected-scope KPIs + Top 5 campaigns + Top 10 highest-spend "
             "search terms. The full dashboard data stays on screen and is not "
             "sent in this AI request."
         )
@@ -2896,7 +3003,7 @@ Keep each reason short.
         ):
 
             daily_ai_cache_key = (
-                f"{date_option}|{selected_campaign}|"
+                f"v2|{date_option}|{selected_campaign}|"
                 f"{total_impressions}|{total_clicks}|{total_cost}|"
                 f"{total_conversions}|{total_calls}|{overall_ctr}|{overall_cpc}|"
                 f"{overall_cpa}|{overall_conversion_rate}|"
@@ -2936,7 +3043,7 @@ SELECTED PERIOD:
 SELECTED CAMPAIGN:
 {selected_campaign}
 
-OVERALL KPIs:
+SELECTED-SCOPE KPIs ({analysis_scope_label}):
 Impressions: {total_impressions}
 Clicks: {total_clicks}
 Calls: {total_calls}
@@ -2946,8 +3053,8 @@ CTR: {overall_ctr:.2f}%
 Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
-Potential waste spend (0 conversions + campaign 0 calls): ₹{daily_waste_amount:.2f}
-Zero-conversion spend in campaigns with calls — REVIEW only: ₹{daily_review_amount:.2f}
+Potential waste spend (0 conversions + clear irrelevant intent): ₹{daily_waste_amount:.2f}
+Other zero-conversion spend requiring review: ₹{daily_review_amount:.2f}
 
 TOP 5 CAMPAIGNS BY SPEND:
 {daily_campaign_context}
@@ -3028,7 +3135,7 @@ Priority must be:
                 st.subheader("🤖 Top 5 AI Actions")
 
                 st.caption(
-                    "AI used a compact context only: overall KPIs, Top 5 campaigns "
+                    "AI used a compact context only: selected-scope KPIs, Top 5 campaigns "
                     "and Top 10 highest-spend search terms."
                 )
 
@@ -3057,7 +3164,7 @@ Priority must be:
 
         st.caption(
             "The full dashboard data stays visible. The AI report uses only "
-            "overall KPIs, Top 5 campaigns, Top 10 highest-spend search terms "
+            "selected-scope KPIs, Top 5 campaigns, Top 10 highest-spend search terms "
             "and Top 5 priority signals to reduce token usage."
         )
 
@@ -3158,18 +3265,24 @@ Priority must be:
                     "No priority actions are currently available."
                 )
 
-            if "waste_df" in locals() and not waste_df.empty and "Cost (₹)" in waste_df.columns:
-                report_waste_amount = float(waste_df["Cost (₹)"].sum())
+            if (
+                "selected_waste_df" in locals()
+                and not selected_waste_df.empty
+                and "Cost (₹)" in selected_waste_df.columns
+            ):
+                report_waste_amount = float(
+                    selected_waste_df["Cost (₹)"].sum()
+                )
             else:
                 report_waste_amount = 0.0
 
             if (
-                "review_spend_df" in locals()
-                and not review_spend_df.empty
-                and "Cost (₹)" in review_spend_df.columns
+                "selected_review_spend_df" in locals()
+                and not selected_review_spend_df.empty
+                and "Cost (₹)" in selected_review_spend_df.columns
             ):
                 report_review_amount = float(
-                    review_spend_df["Cost (₹)"].sum()
+                    selected_review_spend_df["Cost (₹)"].sum()
                 )
             else:
                 report_review_amount = 0.0
@@ -3182,7 +3295,10 @@ Use ONLY the supplied data. Never invent metrics, savings or causes that the dat
 REPORT PERIOD:
 {report_period}
 
-OVERALL KPIs:
+SELECTED SCOPE:
+{analysis_scope_label}
+
+SELECTED-SCOPE KPIs:
 Impressions: {total_impressions}
 Clicks: {total_clicks}
 Calls: {total_calls}
@@ -3192,8 +3308,8 @@ CTR: {overall_ctr:.2f}%
 Average CPC: ₹{overall_cpc:.2f}
 CPA: ₹{overall_cpa:.2f}
 Conversion Rate: {overall_conversion_rate:.2f}%
-Potential waste spend (0 conversions + campaign 0 calls): ₹{report_waste_amount:.2f}
-Zero-conversion spend in campaigns with calls — REVIEW only: ₹{report_review_amount:.2f}
+Potential waste spend (0 conversions + clear irrelevant intent): ₹{report_waste_amount:.2f}
+Other zero-conversion spend requiring review: ₹{report_review_amount:.2f}
 
 TOP CAMPAIGNS BY SPEND (MAX 5):
 {report_campaign_context}
@@ -3220,7 +3336,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 """
 
             report_cache_key = (
-                f"v3|{report_period}|{selected_campaign}|"
+                f"v4|{report_period}|{selected_campaign}|"
                 f"{total_impressions}|{total_clicks}|{total_calls}|{total_cost:.2f}|"
                 f"{total_conversions:.2f}|{report_waste_amount:.2f}|{report_review_amount:.2f}|"
                 f"{report_campaign_context}|"
@@ -3287,6 +3403,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
         st.divider()
         st.header("🧠 Account Health Score")
+        st.caption(f"Scope: {analysis_scope_label}")
 
         # Use the currently selected campaign/date-range data
         health_impressions = float(filtered_df["Impressions"].sum()) if "Impressions" in filtered_df.columns else 0
@@ -3383,7 +3500,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 f"🟢 Google Ads reports {health_calls} phone calls for the selected data."
             )
 
-        # Waste spend — call-aware and Campaign Filter aligned
+        # Waste spend — clear-intent and Campaign Filter aligned
         if "selected_waste_df" in locals() and not selected_waste_df.empty:
             waste_amount = float(selected_waste_df["Cost (₹)"].sum())
 
@@ -3442,6 +3559,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
         st.divider()
         st.header("🚨 Waste Risk & Budget Intelligence")
+        st.caption(f"Scope: {analysis_scope_label}")
 
         selected_spend = (
             float(filtered_df["Cost (₹)"].sum())
@@ -3545,10 +3663,10 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         )
 
         st.caption(
-            "Call-aware safety: a zero-conversion search term is counted as Potential Waste "
-            "only when its campaign has zero Google Ads reported calls. If the campaign has "
-            "calls, that spend is moved to Review Spend because phone_calls is not available "
-            "at individual search-term level."
+            "Potential Waste is limited to zero-conversion search terms with clear irrelevant "
+            "intent such as jobs, vacancies, salary, courses or training. Other zero-conversion "
+            "terms stay in Review Spend. Google Ads phone_calls are campaign-level context only, "
+            "so a campaign call never proves that a specific search term generated a call."
         )
 
         # -----------------------------
@@ -3561,9 +3679,9 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
         if review_amount > 0:
             budget_actions.append(
-                f"📞 **₹{review_amount:,.2f} is Review Spend, not automatic waste.** "
-                "Those zero-conversion terms belong to campaigns that reported calls, so "
-                "check call quality and call-conversion tracking before blocking them."
+                f"🟡 **₹{review_amount:,.2f} is Review Spend, not automatic waste.** "
+                "These are zero-conversion terms without a clear irrelevant-intent signal. "
+                "Review search intent, campaign fit and call quality before blocking them."
             )
 
         # Critical / high waste = do NOT increase budget
@@ -3723,6 +3841,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
         st.divider()
         st.header("📊 Before vs After Performance Intelligence")
+        st.caption(f"Scope: {analysis_scope_label}")
 
 
         def baf_numeric_series(data, possible_names):
@@ -4963,6 +5082,7 @@ JSON SCHEMA:
 
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
+        st.caption(f"Scope: {analysis_scope_label}")
 
         # ==================================================
         # CHAT HISTORY
@@ -4980,12 +5100,14 @@ JSON SCHEMA:
         else:
             current_ai_period = date_option
 
-        if "ai_chat_period" not in st.session_state:
-            st.session_state.ai_chat_period = current_ai_period
+        current_ai_scope = f"{current_ai_period}|{selected_campaign}"
 
-        elif st.session_state.ai_chat_period != current_ai_period:
+        if "ai_chat_period" not in st.session_state:
+            st.session_state.ai_chat_period = current_ai_scope
+
+        elif st.session_state.ai_chat_period != current_ai_scope:
             st.session_state.ai_chat_history = []
-            st.session_state.ai_chat_period = current_ai_period
+            st.session_state.ai_chat_period = current_ai_scope
 
         if st.button(
             "🗑️ Clear AI Chat",
@@ -5532,7 +5654,7 @@ JSON SCHEMA:
         BEFORE VS AFTER DATA:
         {before_after_context}
 
-        OVERALL METRICS:
+        SELECTED-SCOPE METRICS ({analysis_scope_label}):
         Impressions: {total_impressions}
         Clicks: {total_clicks}
         Calls: {total_calls}
@@ -5554,7 +5676,7 @@ JSON SCHEMA:
                     # ==================================================
 
                     ask_ai_cache_key = (
-                        f"v4|{current_ai_period}|{selected_campaign}|{total_calls}|"
+                        f"v5|{current_ai_period}|{selected_campaign}|{total_calls}|"
                         f"{question}|{ask_campaign_context}|"
                         f"{search_terms_context}|{before_after_context}"
                     )
