@@ -530,6 +530,451 @@ def campaign_builder_mutate(
 
 
 # ==================================================
+# GROWTH INTELLIGENCE HELPERS
+# TOP KEYWORDS + SEARCH VOLUME + COMPETITORS
+# ==================================================
+
+GROWTH_OWN_BRAND_PHRASES = (
+    "hare krishna",
+    "harekrishna",
+    "hare krishna home care",
+    "harekrishna home care",
+    "hare krishna home care services",
+    "harekrishna home care services",
+    "shiva kaartikeya",
+    "shiva kartikeya",
+    "shivakaartikeya",
+    "shiva kaartikeya home care",
+    "shivakaartikeya home care",
+)
+
+GROWTH_OWN_DOMAINS = (
+    "hareekrishna.com",
+    "harekrishna.com",
+    "shivakaartikeya.com",
+)
+
+GROWTH_GENERIC_SERVICE_TOKENS = {
+    "home", "care", "homecare", "service", "services", "elderly", "senior",
+    "seniors", "old", "age", "aged", "patient", "patients", "nursing",
+    "nurse", "nurses", "caretaker", "caretakers", "caregiver", "caregivers",
+    "attendant", "attendants", "baby", "babysitter", "babysitters", "nanny",
+    "nannies", "maid", "maids", "domestic", "help", "housekeeping",
+    "housekeeper", "housekeepers", "cook", "cooks", "doctor", "doctors",
+    "medical", "health", "support", "professional", "private", "personal",
+    "bedridden", "surgery", "post", "skilled", "staff", "gnm", "anm",
+    "at", "in", "for", "of", "the", "and", "to", "with", "from", "by",
+    "near", "me", "my", "our", "your", "best", "top", "good", "available",
+    "24", "7", "24x7", "hour", "hours", "day", "days", "daily", "monthly",
+    "hyderabad", "secunderabad", "telangana", "india",
+    "chintal", "suchitra", "jeedimetla", "shapur", "nagole", "uppal",
+    "suraram", "quthbullapur", "kukatpally", "gachibowli", "madhapur",
+    "banjara", "hills", "jubilee", "ameerpet", "begumpet", "kompally",
+    "bachupally", "miyapur", "lingampally", "manikonda", "kondapur",
+    "hitech", "city", "mehdipatnam", "tolichowki", "lb", "nagar",
+}
+
+GROWTH_BUSINESS_MARKERS = (
+    "agency", "company", "pvt", "private limited", "ltd", "limited", "llp",
+    "hospital", "clinic", "foundation", "trust", "solutions", "centre",
+    "center", "nursing home", "old age home", "retirement home",
+    "senior living", "assisted living", "rehab", "rehabilitation", "wellness",
+)
+
+
+def growth_normalize_text(value):
+    value = str(value or "").casefold().strip()
+    value = re.sub(r"https?://", "", value)
+    value = re.sub(r"^www\.", "", value)
+    value = re.sub(r"[^a-z0-9\s.-]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def growth_normalize_keyword(value):
+    value = growth_normalize_text(value)
+    value = value.replace(".", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def growth_is_own_brand(value):
+    term = growth_normalize_text(value)
+    return any(brand in term for brand in GROWTH_OWN_BRAND_PHRASES)
+
+
+def growth_is_own_domain(value):
+    domain = growth_normalize_text(value).split("/")[0]
+    return any(
+        domain == own_domain or domain.endswith("." + own_domain)
+        for own_domain in GROWTH_OWN_DOMAINS
+    )
+
+
+def growth_safe_float(value, default=0.0):
+    try:
+        if value is None or pd.isna(value):
+            return default
+        number = float(value)
+        if number != number or number in (float("inf"), float("-inf")):
+            return default
+        return number
+    except (TypeError, ValueError):
+        return default
+
+
+def growth_percentage(value):
+    """Convert Google Ads ratio-style percentage metrics to 0-100 values."""
+    number = growth_safe_float(value, 0.0)
+    return number * 100.0
+
+
+def growth_enum_name(value):
+    if value is None:
+        return "UNSPECIFIED"
+    name = getattr(value, "name", None)
+    if name:
+        return str(name)
+    text = str(value)
+    if "." in text:
+        text = text.split(".")[-1]
+    return text
+
+
+def growth_competition_name(value):
+    name = growth_enum_name(value)
+    enum_map = {
+        "0": "UNSPECIFIED",
+        "1": "UNKNOWN",
+        "2": "LOW",
+        "3": "MEDIUM",
+        "4": "HIGH",
+    }
+    return enum_map.get(name, name)
+
+
+def growth_extract_json_array(text):
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    start = raw.find("[")
+    end = raw.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("AI did not return a JSON array.")
+    data = json.loads(raw[start:end + 1])
+    if not isinstance(data, list):
+        raise ValueError("AI competitor output was not a list.")
+    return data
+
+
+def growth_brand_candidate_score(search_term):
+    term = growth_normalize_text(search_term)
+    if not term or growth_is_own_brand(term):
+        return -999
+
+    cleaned = re.sub(r"[^a-z0-9]+", " ", term)
+    tokens = [token for token in cleaned.split() if token]
+    if not tokens:
+        return -999
+
+    unknown_tokens = [
+        token
+        for token in tokens
+        if token not in GROWTH_GENERIC_SERVICE_TOKENS and not token.isdigit()
+    ]
+
+    score = len(set(unknown_tokens)) * 3
+
+    if len(tokens) <= 4 and unknown_tokens:
+        score += 2
+
+    if any(marker in term for marker in GROWTH_BUSINESS_MARKERS):
+        score += 5
+
+    if any(
+        marker in term
+        for marker in ("phone number", "contact number", "address", "reviews", "review")
+    ):
+        score += 2
+
+    return score
+
+
+def growth_competitor_key(value):
+    text = growth_normalize_text(value)
+    text = re.sub(r"\.(com|in|org|net)$", "", text)
+    text = re.sub(r"\b(pvt|private|ltd|limited|llp)\b", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def growth_competitor_review_risk(spend, conversions, campaign_calls, reference_cpa, reference_cpc):
+    """
+    Conservative risk signal for competitor-brand search terms.
+    A zero-conversion term is never automatically called confirmed waste.
+    """
+    spend = growth_safe_float(spend)
+    conversions = growth_safe_float(conversions)
+    campaign_calls = growth_safe_float(campaign_calls)
+    reference_cpa = growth_safe_float(reference_cpa)
+    reference_cpc = growth_safe_float(reference_cpc)
+
+    if conversions > 0:
+        return "🟢 LOW — Converted"
+
+    if campaign_calls > 0:
+        return "🟠 MEDIUM — Review (campaign has calls)"
+
+    high_threshold = reference_cpa if reference_cpa > 0 else max(reference_cpc * 12, 1200)
+    medium_threshold = max(reference_cpc * 6, 500)
+
+    if spend >= high_threshold and spend > 0:
+        return "🔴 HIGH — Review"
+    if spend >= medium_threshold and spend > 0:
+        return "🟠 MEDIUM — Review"
+    return "🟡 LOW — Monitor"
+
+
+def growth_keyword_signal(conversions, cost, cpa, benchmark_cpa, clicks):
+    conversions = growth_safe_float(conversions)
+    cost = growth_safe_float(cost)
+    cpa = growth_safe_float(cpa)
+    benchmark_cpa = growth_safe_float(benchmark_cpa)
+    clicks = growth_safe_float(clicks)
+
+    if conversions >= 3 and benchmark_cpa > 0 and cpa > 0 and cpa <= benchmark_cpa * 0.80:
+        return "🚀 Scale Candidate"
+    if conversions > 0 and (benchmark_cpa <= 0 or cpa <= benchmark_cpa * 1.20):
+        return "✅ Strong"
+    if conversions > 0:
+        return "🟠 CPA Review"
+    if benchmark_cpa > 0 and cost >= benchmark_cpa:
+        return "🔴 Spend Review"
+    if clicks >= 5:
+        return "🟡 Needs Data / Review"
+    return "⚪ Monitor"
+
+
+def growth_auction_threat_score(overlap, position_above, impression_share, top_impression):
+    overlap = max(0.0, min(100.0, growth_safe_float(overlap)))
+    position_above = max(0.0, min(100.0, growth_safe_float(position_above)))
+    impression_share = max(0.0, min(100.0, growth_safe_float(impression_share)))
+    top_impression = max(0.0, min(100.0, growth_safe_float(top_impression)))
+
+    score = (
+        overlap * 0.35
+        + position_above * 0.30
+        + impression_share * 0.25
+        + top_impression * 0.10
+    )
+    return round(score, 1)
+
+
+def growth_auction_risk(score):
+    score = growth_safe_float(score)
+    if score >= 55:
+        return "🔴 HIGH"
+    if score >= 30:
+        return "🟠 MEDIUM"
+    return "🟢 LOW"
+
+
+def growth_resolve_geo_target(client, location_name="Hyderabad", country_code="IN"):
+    service = client.get_service("GeoTargetConstantService")
+    request = client.get_type("SuggestGeoTargetConstantsRequest")
+    request.locale = "en"
+    request.country_code = country_code
+    request.location_names.names.append(location_name)
+
+    try:
+        response = service.suggest_geo_target_constants(request=request)
+    except TypeError:
+        response = service.suggest_geo_target_constants(request)
+
+    suggestions = list(response.geo_target_constant_suggestions)
+    if not suggestions:
+        raise ValueError(f"No Google Ads geo target found for {location_name}.")
+
+    def suggestion_rank(item):
+        geo = item.geo_target_constant
+        name_match = str(geo.name or "").casefold() == location_name.casefold()
+        city_match = str(geo.target_type or "").casefold() == "city"
+        country_match = str(geo.country_code or "").casefold() == country_code.casefold()
+        return (country_match, name_match, city_match, int(item.reach or 0))
+
+    best = sorted(suggestions, key=suggestion_rank, reverse=True)[0]
+    return best.geo_target_constant.resource_name, best.geo_target_constant.name
+
+
+def growth_fetch_keyword_historical_metrics(
+    client,
+    customer_id,
+    keywords,
+    geo_resource_name,
+    language_id="1000",
+):
+    clean_keywords = []
+    seen = set()
+    for keyword in keywords:
+        text = re.sub(r"\s+", " ", str(keyword or "")).strip()
+        key = growth_normalize_keyword(text)
+        if not text or not key or key in seen:
+            continue
+        seen.add(key)
+        clean_keywords.append(text)
+
+    if not clean_keywords:
+        return pd.DataFrame(), {}
+
+    service = client.get_service("KeywordPlanIdeaService")
+    google_ads_service = client.get_service("GoogleAdsService")
+    request = client.get_type("GenerateKeywordHistoricalMetricsRequest")
+    request.customer_id = customer_id
+    request.keywords.extend(clean_keywords)
+    request.geo_target_constants.append(geo_resource_name)
+    request.keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH
+    request.language = google_ads_service.language_constant_path(str(language_id))
+
+    response = service.generate_keyword_historical_metrics(request=request)
+
+    metric_rows = []
+    monthly_map = {}
+
+    for result in response.results:
+        metrics = result.keyword_metrics
+        result_text = str(result.text or "").strip()
+        aliases = [result_text] + [str(v) for v in list(result.close_variants or [])]
+        aliases = [alias for alias in aliases if alias]
+
+        row = {
+            "Planner Keyword": result_text,
+            "Avg Monthly Searches": int(metrics.avg_monthly_searches or 0),
+            "Competition": growth_competition_name(metrics.competition),
+            "Competition Index": int(metrics.competition_index or 0),
+            "Top Page Bid Low (₹)": round(
+                growth_safe_float(metrics.low_top_of_page_bid_micros) / 1_000_000,
+                2,
+            ),
+            "Top Page Bid High (₹)": round(
+                growth_safe_float(metrics.high_top_of_page_bid_micros) / 1_000_000,
+                2,
+            ),
+            "Close Variants": "; ".join(sorted(set(aliases[1:]))),
+        }
+        metric_rows.append(row)
+
+        monthly_rows = []
+        for month_row in list(metrics.monthly_search_volumes or []):
+            month_name = growth_enum_name(month_row.month)
+            monthly_rows.append(
+                {
+                    "Year": int(month_row.year or 0),
+                    "Month": month_name,
+                    "Monthly Searches": int(month_row.monthly_searches or 0),
+                }
+            )
+
+        for alias in aliases:
+            monthly_map[growth_normalize_keyword(alias)] = monthly_rows
+
+    metrics_df = pd.DataFrame(metric_rows)
+
+    # Expand close variants into a stable alias map so Keyword Planner grouping
+    # can still merge back to the actual Google Ads keyword rows.
+    expanded_rows = []
+    for _, row in metrics_df.iterrows():
+        aliases = [row["Planner Keyword"]]
+        if row.get("Close Variants"):
+            aliases.extend(
+                item.strip()
+                for item in str(row["Close Variants"]).split(";")
+                if item.strip()
+            )
+        for alias in aliases:
+            expanded = row.to_dict()
+            expanded["Keyword Key"] = growth_normalize_keyword(alias)
+            expanded_rows.append(expanded)
+
+    return pd.DataFrame(expanded_rows), monthly_map
+
+
+def growth_fetch_auction_insights(ga_service, customer_id, date_filter_clause):
+    query = f"""
+        SELECT
+            campaign.name,
+            ad_group.name,
+            ad_group_criterion.keyword.text,
+            segments.auction_insight_domain,
+            metrics.auction_insight_search_impression_share,
+            metrics.auction_insight_search_overlap_rate,
+            metrics.auction_insight_search_position_above_rate,
+            metrics.auction_insight_search_top_impression_percentage,
+            metrics.auction_insight_search_absolute_top_impression_percentage,
+            metrics.auction_insight_search_outranking_share
+        FROM keyword_view
+        WHERE {date_filter_clause}
+          AND ad_group_criterion.status != 'REMOVED'
+        ORDER BY metrics.auction_insight_search_overlap_rate DESC
+    """
+
+    response = ga_service.search(customer_id=customer_id, query=query)
+    rows = []
+
+    for row in response:
+        domain = str(row.segments.auction_insight_domain or "").strip()
+        keyword = str(row.ad_group_criterion.keyword.text or "").strip()
+        if not domain or not keyword or growth_is_own_domain(domain):
+            continue
+
+        impression_share = growth_percentage(
+            row.metrics.auction_insight_search_impression_share
+        )
+        overlap = growth_percentage(
+            row.metrics.auction_insight_search_overlap_rate
+        )
+        position_above = growth_percentage(
+            row.metrics.auction_insight_search_position_above_rate
+        )
+        top_impression = growth_percentage(
+            row.metrics.auction_insight_search_top_impression_percentage
+        )
+        absolute_top = growth_percentage(
+            row.metrics.auction_insight_search_absolute_top_impression_percentage
+        )
+        outranking = growth_percentage(
+            row.metrics.auction_insight_search_outranking_share
+        )
+
+        threat_score = growth_auction_threat_score(
+            overlap,
+            position_above,
+            impression_share,
+            top_impression,
+        )
+
+        rows.append(
+            {
+                "Keyword": keyword,
+                "Keyword Key": growth_normalize_keyword(keyword),
+                "Campaign": row.campaign.name,
+                "Ad Group": row.ad_group.name,
+                "Competitor Domain": domain,
+                "Competitor Impression Share %": round(impression_share, 2),
+                "Overlap Rate %": round(overlap, 2),
+                "Position Above Rate %": round(position_above, 2),
+                "Top Impression %": round(top_impression, 2),
+                "Absolute Top %": round(absolute_top, 2),
+                "Our Outranking Share %": round(outranking, 2),
+                "Threat Score": threat_score,
+                "Threat": growth_auction_risk(threat_score),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+
+# ==================================================
 # PAGE SETTINGS
 # ==================================================
 
@@ -1832,916 +2277,1424 @@ try:
             st.info("Search term data is not available.")
 
         # ==================================================
-        # COMPETITOR SEARCH-TERM INTELLIGENCE
-        # FULL-CANDIDATE SCAN + BATCHED AI (15 TERMS PER CALL)
+        # GROWTH INTELLIGENCE HUB
+        # TOP KEYWORDS + SEARCH VOLUME + COMPETITORS
         # ==================================================
 
         st.divider()
-        st.header("🏁 Competitor Intelligence")
-
+        st.header("🚀 Growth Intelligence Hub")
         st.caption(
-            "Scans the full selected-period search-term dataset locally, "
-            "then sends EVERY likely brand / competitor / ambiguous candidate "
-            "to AI in batches of up to 15 terms. There is no Top-15 total cap. "
-            "This is search-term intelligence, not Auction Insights."
+            "Top Keywords, Google Keyword Planner search volume and competitor intelligence "
+            "in one place. Heavy scans run only when you click their buttons."
         )
 
-        if "search_df" in locals() and not search_df.empty:
+        # --------------------------------------------------
+        # KEYWORD PERFORMANCE DATA
+        # --------------------------------------------------
 
-            competitor_required_columns = [
-                "Search Term",
-                "Clicks",
-                "Cost (₹)",
-                "Conversions"
-            ]
+        keyword_perf_df = pd.DataFrame()
+        keyword_summary_df = pd.DataFrame()
+        keyword_data_error = None
 
-            competitor_missing_columns = [
-                col
-                for col in competitor_required_columns
-                if col not in search_df.columns
-            ]
+        try:
+            keyword_perf_query = f"""
+                SELECT
+                    campaign.name,
+                    ad_group.name,
+                    ad_group_criterion.keyword.text,
+                    ad_group_criterion.keyword.match_type,
+                    ad_group_criterion.status,
+                    metrics.impressions,
+                    metrics.clicks,
+                    metrics.cost_micros,
+                    metrics.conversions
+                FROM keyword_view
+                WHERE {date_filter_clause}
+                  AND ad_group_criterion.status != 'REMOVED'
+                ORDER BY metrics.cost_micros DESC
+            """
 
-            if competitor_missing_columns:
+            keyword_perf_response = ga_service.search(
+                customer_id=customer_id,
+                query=keyword_perf_query,
+            )
 
-                st.warning(
-                    "Required competitor-analysis columns are missing: "
-                    + ", ".join(competitor_missing_columns)
+            keyword_perf_rows = []
+
+            for row in keyword_perf_response:
+                kw_impressions = int(row.metrics.impressions or 0)
+                kw_clicks = int(row.metrics.clicks or 0)
+                kw_cost = growth_safe_float(row.metrics.cost_micros) / 1_000_000
+                kw_conversions = growth_safe_float(row.metrics.conversions)
+                kw_ctr = kw_clicks / kw_impressions * 100 if kw_impressions else 0
+                kw_cpc = kw_cost / kw_clicks if kw_clicks else 0
+                kw_cpa = kw_cost / kw_conversions if kw_conversions else 0
+                kw_cvr = kw_conversions / kw_clicks * 100 if kw_clicks else 0
+
+                keyword_perf_rows.append(
+                    {
+                        "Keyword": str(row.ad_group_criterion.keyword.text or "").strip(),
+                        "Keyword Key": growth_normalize_keyword(
+                            row.ad_group_criterion.keyword.text
+                        ),
+                        "Campaign": row.campaign.name,
+                        "Ad Group": row.ad_group.name,
+                        "Match Type": growth_enum_name(
+                            row.ad_group_criterion.keyword.match_type
+                        ),
+                        "Status": growth_enum_name(
+                            row.ad_group_criterion.status
+                        ),
+                        "Impressions": kw_impressions,
+                        "Clicks": kw_clicks,
+                        "Cost (₹)": round(kw_cost, 2),
+                        "Conversions": round(kw_conversions, 2),
+                        "CTR %": round(kw_ctr, 2),
+                        "Avg CPC (₹)": round(kw_cpc, 2),
+                        "CPA (₹)": round(kw_cpa, 2),
+                        "Conversion Rate %": round(kw_cvr, 2),
+                    }
                 )
 
-            else:
+            keyword_perf_df = pd.DataFrame(keyword_perf_rows)
 
-                import hashlib
-                import json
+            if not keyword_perf_df.empty:
+                if selected_campaign != "All Campaigns":
+                    keyword_perf_df = keyword_perf_df[
+                        keyword_perf_df["Campaign"] == selected_campaign
+                    ].copy()
 
-                competitor_source_df = search_df.copy()
-
-                competitor_source_df["Search Term"] = (
-                    competitor_source_df["Search Term"]
-                    .fillna("")
-                    .astype(str)
-                    .str.strip()
-                )
-
-                competitor_source_df = competitor_source_df[
-                    competitor_source_df["Search Term"] != ""
+                keyword_perf_df = keyword_perf_df[
+                    keyword_perf_df["Keyword"].astype(str).str.strip() != ""
                 ].copy()
 
-                competitor_source_df = competitor_source_df.sort_values(
-                    "Cost (₹)",
-                    ascending=False
+            if not keyword_perf_df.empty:
+                keyword_summary_rows = []
+
+                for keyword_key, group_df in keyword_perf_df.groupby(
+                    "Keyword Key",
+                    dropna=False,
+                ):
+                    impressions = float(group_df["Impressions"].sum())
+                    clicks = float(group_df["Clicks"].sum())
+                    cost = float(group_df["Cost (₹)"].sum())
+                    conversions = float(group_df["Conversions"].sum())
+
+                    keyword_values = [
+                        str(v).strip()
+                        for v in group_df["Keyword"].tolist()
+                        if str(v).strip()
+                    ]
+                    keyword_label = keyword_values[0] if keyword_values else str(keyword_key)
+
+                    ctr = clicks / impressions * 100 if impressions else 0
+                    cpc = cost / clicks if clicks else 0
+                    cpa = cost / conversions if conversions else 0
+                    cvr = conversions / clicks * 100 if clicks else 0
+
+                    keyword_summary_rows.append(
+                        {
+                            "Keyword": keyword_label,
+                            "Keyword Key": keyword_key,
+                            "Campaigns": "; ".join(
+                                sorted(set(group_df["Campaign"].astype(str)))
+                            ),
+                            "Ad Groups": "; ".join(
+                                sorted(set(group_df["Ad Group"].astype(str)))
+                            ),
+                            "Match Types": "; ".join(
+                                sorted(set(group_df["Match Type"].astype(str)))
+                            ),
+                            "Impressions": int(impressions),
+                            "Clicks": int(clicks),
+                            "Cost (₹)": round(cost, 2),
+                            "Conversions": round(conversions, 2),
+                            "CTR %": round(ctr, 2),
+                            "Avg CPC (₹)": round(cpc, 2),
+                            "CPA (₹)": round(cpa, 2),
+                            "Conversion Rate %": round(cvr, 2),
+                        }
+                    )
+
+                keyword_summary_df = pd.DataFrame(keyword_summary_rows)
+
+                keyword_benchmark_cpa = (
+                    float(keyword_summary_df.loc[
+                        keyword_summary_df["Conversions"] > 0,
+                        "CPA (₹)",
+                    ].replace(0, pd.NA).dropna().median())
+                    if not keyword_summary_df.loc[
+                        keyword_summary_df["Conversions"] > 0
+                    ].empty
+                    else 0.0
                 )
 
-                if not competitor_source_df.empty:
+                if overall_cpa > 0:
+                    keyword_benchmark_cpa = float(overall_cpa)
 
-                    # ------------------------------------------
-                    # LOCAL FULL-DATA CANDIDATE SCAN
-                    # No OpenAI tokens are used here.
-                    # ------------------------------------------
+                keyword_summary_df["AI Signal"] = keyword_summary_df.apply(
+                    lambda row: growth_keyword_signal(
+                        row["Conversions"],
+                        row["Cost (₹)"],
+                        row["CPA (₹)"],
+                        keyword_benchmark_cpa,
+                        row["Clicks"],
+                    ),
+                    axis=1,
+                )
 
-                    own_brand_phrases = [
-                        "hare krishna",
-                        "harekrishna",
-                        "hare krishna home care",
-                        "harekrishna home care",
-                        "hare krishna home care services",
-                        "harekrishna home care services"
+        except Exception as keyword_error:
+            keyword_data_error = keyword_error
+
+        growth_tab_keywords, growth_tab_volume, growth_tab_competitors = st.tabs(
+            [
+                "🏆 Top Keywords",
+                "🔎 Search Volume",
+                "🏁 Competitors",
+            ]
+        )
+
+        # ==================================================
+        # TAB 1 — TOP KEYWORDS
+        # ==================================================
+
+        with growth_tab_keywords:
+            st.subheader("🏆 Top Keyword Performance")
+            st.caption(
+                "Uses actual Google Ads keyword performance for the selected date range and campaign. "
+                "Calls are not assigned to individual keywords because Google Ads phone_calls is campaign-level context."
+            )
+
+            if keyword_data_error is not None:
+                st.warning(
+                    "Keyword performance could not be loaded. The rest of the dashboard will continue to work."
+                )
+                st.caption(f"Technical detail: {keyword_data_error}")
+
+            elif keyword_summary_df.empty:
+                st.info("No keyword performance data is available for the selected scope.")
+
+            else:
+                kw_metric1, kw_metric2, kw_metric3, kw_metric4 = st.columns(4)
+
+                kw_metric1.metric(
+                    "Keywords With Data",
+                    f"{len(keyword_summary_df):,}",
+                )
+                kw_metric2.metric(
+                    "Converting Keywords",
+                    f"{int((keyword_summary_df['Conversions'] > 0).sum()):,}",
+                )
+                kw_metric3.metric(
+                    "Keyword Spend",
+                    f"₹{float(keyword_summary_df['Cost (₹)'].sum()):,.2f}",
+                )
+                kw_metric4.metric(
+                    "Keyword Conversions",
+                    f"{float(keyword_summary_df['Conversions'].sum()):,.1f}",
+                )
+
+                top_converter_df = keyword_summary_df.sort_values(
+                    ["Conversions", "CPA (₹)", "Cost (₹)"],
+                    ascending=[False, True, False],
+                ).head(15)
+
+                best_cpa_df = keyword_summary_df[
+                    keyword_summary_df["Conversions"] > 0
+                ].copy()
+                best_cpa_df = best_cpa_df.sort_values(
+                    ["CPA (₹)", "Conversions"],
+                    ascending=[True, False],
+                ).head(15)
+
+                high_spend_df = keyword_summary_df.sort_values(
+                    ["Cost (₹)", "Conversions"],
+                    ascending=[False, False],
+                ).head(15)
+
+                kw_view1, kw_view2, kw_view3 = st.tabs(
+                    [
+                        "🔥 High Converting",
+                        "💰 Best CPA",
+                        "📈 Highest Spend",
                     ]
+                )
 
-                    generic_competitor_words = {
-                        "home", "care", "homecare", "service", "services",
-                        "elderly", "senior", "seniors", "old", "age", "aged",
-                        "patient", "patients", "nursing", "nurse", "nurses",
-                        "caretaker", "caretakers", "taker", "attendant", "attendants",
-                        "baby", "babysitter", "babysitters", "nanny", "nannies",
-                        "maid", "maids", "domestic", "help", "housekeeping",
-                        "housekeeper", "housekeepers", "cook", "cooks",
-                        "doctor", "doctors", "medical", "health",
-                        "at", "in", "for", "of", "the", "and", "to", "with",
-                        "near", "me", "my", "our", "your", "best", "top",
-                        "good", "professional", "private", "personal", "personalized",
-                        "24", "7", "24x7", "hour", "hours", "day", "days",
-                        "hyderabad", "secunderabad", "telangana"
-                    }
+                keyword_display_columns = [
+                    "Keyword",
+                    "Campaigns",
+                    "Match Types",
+                    "Impressions",
+                    "Clicks",
+                    "Cost (₹)",
+                    "Conversions",
+                    "CTR %",
+                    "Avg CPC (₹)",
+                    "CPA (₹)",
+                    "Conversion Rate %",
+                    "AI Signal",
+                ]
 
-                    business_marker_phrases = [
-                        "agency",
-                        "company",
-                        "pvt",
-                        "private limited",
-                        "ltd",
-                        "limited",
-                        "llp",
-                        "hospital",
-                        "clinic",
-                        "foundation",
-                        "trust",
-                        "solutions",
-                        "centre",
-                        "center",
-                        "nursing home",
-                        "old age home",
-                        "old age homes",
-                        "retirement home",
-                        "retirement homes",
-                        "senior living",
-                        "assisted living",
-                        "rehab",
-                        "rehabilitation",
-                        "wellness"
-                    ]
-
-                    navigational_marker_phrases = [
-                        "phone number",
-                        "contact number",
-                        "address",
-                        "photos",
-                        "reviews",
-                        "review"
-                    ]
-
-                    alternate_service_phrases = [
-                        "massage",
-                        "therapy",
-                        "physiotherapy",
-                        "nursing home",
-                        "old age home",
-                        "old age homes",
-                        "hospital",
-                        "clinic"
-                    ]
-
-                    def is_own_brand_term(search_term):
-                        term = str(search_term).strip().lower()
-                        return any(
-                            brand_phrase in term
-                            for brand_phrase in own_brand_phrases
-                        )
-
-                    def competitor_brand_score(search_term):
-                        term = str(search_term).strip().lower()
-
-                        if not term:
-                            return -999
-
-                        if is_own_brand_term(term):
-                            return -999
-
-                        cleaned = "".join(
-                            ch if ch.isalnum() else " "
-                            for ch in term
-                        )
-
-                        tokens = [
-                            token
-                            for token in cleaned.split()
-                            if token
-                        ]
-
-                        if not tokens:
-                            return -999
-
-                        unknown_tokens = [
-                            token
-                            for token in tokens
-                            if token not in generic_competitor_words
-                            and not token.isdigit()
-                        ]
-
-                        # Any non-generic word can be a name, place, brand,
-                        # facility, platform or unusual intent signal.
-                        score = len(set(unknown_tokens)) * 3
-
-                        if len(tokens) <= 4 and unknown_tokens:
-                            score += 2
-
-                        if any(
-                            marker in term
-                            for marker in business_marker_phrases
-                        ):
-                            score += 5
-
-                        if any(
-                            marker in term
-                            for marker in navigational_marker_phrases
-                        ):
-                            score += 2
-
-                        if any(
-                            marker in term
-                            for marker in alternate_service_phrases
-                        ):
-                            score += 2
-
-                        return score
-
-                    competitor_source_df[
-                        "_Brand Candidate Score"
-                    ] = competitor_source_df[
-                        "Search Term"
-                    ].apply(competitor_brand_score)
-
-                    # Own brand is detected across the FULL data and is never
-                    # sent as a competitor candidate.
-                    own_brand_df = competitor_source_df[
-                        competitor_source_df["Search Term"].apply(
-                            is_own_brand_term
-                        )
-                    ].copy()
-
-                    # IMPORTANT: no .head(15) here. Every locally detected
-                    # candidate is kept and processed in 15-term AI batches.
-                    competitor_candidate_df = competitor_source_df[
-                        competitor_source_df[
-                            "_Brand Candidate Score"
-                        ] > 0
-                    ].copy()
-
-                    competitor_candidate_df = competitor_candidate_df.sort_values(
-                        ["_Brand Candidate Score", "Cost (₹)"],
-                        ascending=[False, False]
-                    ).reset_index(drop=True)
-
-                    competitor_candidate_df["Row ID"] = range(
-                        1,
-                        len(competitor_candidate_df) + 1
+                with kw_view1:
+                    st.dataframe(
+                        top_converter_df[keyword_display_columns],
+                        width="stretch",
+                        hide_index=True,
                     )
 
-                    competitor_batch_size = 15
-                    competitor_batch_count = (
-                        len(competitor_candidate_df)
-                        + competitor_batch_size
-                        - 1
-                    ) // competitor_batch_size
-
-                    comp_col1, comp_col2, comp_col3, comp_col4 = st.columns(4)
-
-                    with comp_col1:
-                        st.metric(
-                            "Search Terms Scanned",
-                            f"{len(competitor_source_df):,}"
+                with kw_view2:
+                    if best_cpa_df.empty:
+                        st.info("No converting keyword is available for Best CPA ranking.")
+                    else:
+                        st.dataframe(
+                            best_cpa_df[keyword_display_columns],
+                            width="stretch",
+                            hide_index=True,
                         )
 
-                    with comp_col2:
-                        st.metric(
-                            "AI Candidate Terms",
-                            f"{len(competitor_candidate_df):,}"
-                        )
-
-                    with comp_col3:
-                        st.metric(
-                            "AI Batches",
-                            f"{competitor_batch_count:,}"
-                        )
-
-                    with comp_col4:
-                        st.metric(
-                            "Spend Represented",
-                            f"₹{float(competitor_source_df['Cost (₹)'].sum()):,.2f}"
-                        )
-
-                    st.info(
-                        "Full search-term data is scanned locally first. "
-                        "Every likely brand / competitor / ambiguous candidate "
-                        "is then analyzed in batches of up to 15 terms. "
-                        "The first full scan can use multiple AI calls; the same "
-                        "batch data is cached so repeat runs do not call AI again."
+                with kw_view3:
+                    st.dataframe(
+                        high_spend_df[keyword_display_columns],
+                        width="stretch",
+                        hide_index=True,
                     )
 
-                    if own_brand_df.empty:
-                        st.caption(
-                            "No Harekrishna own-brand search term was found in "
-                            "the current selected-period data."
+                st.caption(
+                    "AI Signal is a decision-support label only. No bid or keyword change is applied automatically."
+                )
+
+        # ==================================================
+        # TAB 2 — SEARCH VOLUME / KEYWORD PLANNER
+        # ==================================================
+
+        with growth_tab_volume:
+            st.subheader("🔎 Keyword Search Volume & Market Demand")
+            st.caption(
+                "Google Keyword Planner historical metrics are loaded only when you click the button. "
+                "Results are cached in this session so normal dashboard refreshes do not repeatedly call Keyword Planner."
+            )
+
+            if keyword_summary_df.empty:
+                st.info("Keyword performance data is required before search volume can be loaded.")
+
+            else:
+                volume_col1, volume_col2 = st.columns(2)
+
+                with volume_col1:
+                    planner_language = st.selectbox(
+                        "Keyword Planner Language",
+                        ["English", "Hindi", "Telugu"],
+                        index=0,
+                        key="growth_planner_language",
+                    )
+
+                with volume_col2:
+                    planner_keyword_limit = st.select_slider(
+                        "Keywords To Check",
+                        options=[25, 50, 75, 100],
+                        value=50,
+                        key="growth_planner_keyword_limit",
+                    )
+
+                planner_language_id = CAMPAIGN_BUILDER_LANGUAGE_IDS.get(
+                    planner_language,
+                    "1000",
+                )
+
+                planner_source_df = keyword_summary_df.sort_values(
+                    ["Conversions", "Cost (₹)", "Clicks"],
+                    ascending=[False, False, False],
+                ).head(int(planner_keyword_limit))
+
+                planner_keywords = planner_source_df["Keyword"].astype(str).tolist()
+
+                volume_request_key = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "scope": analysis_scope_label,
+                            "date": date_option,
+                            "keywords": sorted(
+                                growth_normalize_keyword(v)
+                                for v in planner_keywords
+                            ),
+                            "language": planner_language_id,
+                            "location": "Hyderabad, IN",
+                        },
+                        sort_keys=True,
+                    ).encode("utf-8")
+                ).hexdigest()
+
+                if st.button(
+                    "🔎 Load Hyderabad Search Volume",
+                    key="growth_load_search_volume_button",
+                    type="primary",
+                ):
+                    try:
+                        with st.spinner(
+                            "Loading Keyword Planner historical metrics for Hyderabad..."
+                        ):
+                            geo_resource_name, geo_name = growth_resolve_geo_target(
+                                client,
+                                location_name="Hyderabad",
+                                country_code="IN",
+                            )
+
+                            planner_metrics_df, planner_monthly_map = (
+                                growth_fetch_keyword_historical_metrics(
+                                    client=client,
+                                    customer_id=customer_id,
+                                    keywords=planner_keywords,
+                                    geo_resource_name=geo_resource_name,
+                                    language_id=planner_language_id,
+                                )
+                            )
+
+                        st.session_state["growth_volume_cache_key"] = volume_request_key
+                        st.session_state["growth_volume_metrics_df"] = planner_metrics_df
+                        st.session_state["growth_volume_monthly_map"] = planner_monthly_map
+                        st.session_state["growth_volume_geo_name"] = geo_name
+                        st.session_state["growth_volume_language"] = planner_language
+
+                    except Exception as planner_error:
+                        st.error(
+                            "Keyword Planner search volume could not be loaded. "
+                            "No other dashboard section was affected."
+                        )
+                        st.caption(f"Technical detail: {planner_error}")
+
+                volume_cache_is_current = (
+                    st.session_state.get("growth_volume_cache_key")
+                    == volume_request_key
+                    and isinstance(
+                        st.session_state.get("growth_volume_metrics_df"),
+                        pd.DataFrame,
+                    )
+                )
+
+                if volume_cache_is_current:
+                    planner_metrics_df = st.session_state.get(
+                        "growth_volume_metrics_df",
+                        pd.DataFrame(),
+                    ).copy()
+                    planner_monthly_map = st.session_state.get(
+                        "growth_volume_monthly_map",
+                        {},
+                    )
+                    planner_geo_name = st.session_state.get(
+                        "growth_volume_geo_name",
+                        "Hyderabad",
+                    )
+                    planner_language_name = st.session_state.get(
+                        "growth_volume_language",
+                        planner_language,
+                    )
+
+                    if planner_metrics_df.empty:
+                        st.info(
+                            "Keyword Planner returned no historical metrics for these keywords."
                         )
                     else:
-                        st.caption(
-                            f"🛡 Own-brand terms protected locally: "
-                            f"{len(own_brand_df):,}"
-                        )
+                        planner_alias_df = planner_metrics_df.drop_duplicates(
+                            subset=["Keyword Key"],
+                            keep="first",
+                        ).copy()
 
-                    if competitor_candidate_df.empty:
-
-                        st.success(
-                            "No likely brand / competitor / ambiguous search-term "
-                            "candidates were found in the selected-period data."
-                        )
-
-                    elif st.button(
-                        "🧠 Run Full Competitor Scan",
-                        key="competitor_intelligence_full_scan_v3"
-                    ):
-
-                        if "competitor_batch_cache_v3" not in st.session_state:
-                            st.session_state[
-                                "competitor_batch_cache_v3"
-                            ] = {}
-
-                        competitor_batch_cache = st.session_state[
-                            "competitor_batch_cache_v3"
+                        planner_merge_columns = [
+                            "Keyword Key",
+                            "Avg Monthly Searches",
+                            "Competition",
+                            "Competition Index",
+                            "Top Page Bid Low (₹)",
+                            "Top Page Bid High (₹)",
+                            "Planner Keyword",
                         ]
 
-                        competitor_ai_columns = [
-                            "Row ID",
-                            "Search Term"
+                        volume_perf_df = keyword_summary_df.merge(
+                            planner_alias_df[planner_merge_columns],
+                            on="Keyword Key",
+                            how="left",
+                        )
+
+                        volume_perf_df["Avg Monthly Searches"] = pd.to_numeric(
+                            volume_perf_df["Avg Monthly Searches"],
+                            errors="coerce",
+                        ).fillna(0)
+
+                        positive_volumes = volume_perf_df.loc[
+                            volume_perf_df["Avg Monthly Searches"] > 0,
+                            "Avg Monthly Searches",
                         ]
 
-                        if "Campaign" in competitor_candidate_df.columns:
-                            competitor_ai_columns.append("Campaign")
-
-                        competitor_ai_columns.extend(
-                            [
-                                "Clicks",
-                                "Cost (₹)",
-                                "Conversions"
-                            ]
-                        )
-
-                        all_competitor_ai_rows = []
-                        cached_batch_count = 0
-                        new_ai_batch_count = 0
-                        failed_batch_count = 0
-
-                        competitor_progress = st.progress(0)
-                        competitor_status = st.empty()
-
-                        for batch_number, start_index in enumerate(
-                            range(
-                                0,
-                                len(competitor_candidate_df),
-                                competitor_batch_size
-                            ),
-                            start=1
-                        ):
-
-                            batch_df = competitor_candidate_df.iloc[
-                                start_index:
-                                start_index + competitor_batch_size
-                            ][competitor_ai_columns].copy()
-
-                            batch_records = batch_df.to_dict(
-                                orient="records"
-                            )
-
-                            batch_context = json.dumps(
-                                batch_records,
-                                ensure_ascii=False,
-                                default=str
-                            )
-
-                            batch_cache_payload = (
-                                f"v4|{date_option}|{selected_campaign}|"
-                                f"{batch_context}"
-                            )
-
-                            batch_cache_key = hashlib.sha256(
-                                batch_cache_payload.encode("utf-8")
-                            ).hexdigest()
-
-                            competitor_status.caption(
-                                f"Analyzing competitor batch "
-                                f"{batch_number} of {competitor_batch_count}..."
-                            )
-
-                            if batch_cache_key in competitor_batch_cache:
-
-                                batch_result_rows = competitor_batch_cache[
-                                    batch_cache_key
-                                ]
-
-                                cached_batch_count += 1
-
-                            else:
-
-                                competitor_prompt = f"""
-You are a senior Google Ads competitor search-term classifier.
-
-BUSINESS:
-Harekrishna Home Care Services
-
-PRIMARY MARKET:
-Hyderabad
-
-CORE IN-HOME SERVICES:
-home care, elderly care, senior care, patient care,
-nursing, nurse at home, home nurse, caretaker,
-care taker, baby care, babysitter, nanny,
-maid, domestic help, housekeeping, housekeeper, cook.
-
-OWN BRAND — NEVER CLASSIFY AS A COMPETITOR:
-hare krishna
-harekrishna
-hare krishna home care
-harekrishna home care
-hare krishna home care services
-harekrishna home care services
-
-CLASSIFICATION RULES:
-1. COMPETITOR only when the search term contains a CLEAR, DISTINCTIVE business/brand/provider name.
-   A service category by itself is NEVER a competitor name.
-2. A competitor name must contain at least one distinctive naming token beyond generic words such as
-   home, care, services, service, nursing, nurse, agency, caretaker, baby, nanny, old age home,
-   healthcare, health care, hospital, clinic, senior, elderly, Hyderabad, near me, on call.
-7. Examples that are NOT competitor names by themselves: "nursing on call agency", "baby care agency",
-   "nearest home care agency", "old age home", "nursing home", "home care services".
-8. If a term only looks like a generic service/category or you are unsure whether the leading word is
-   actually a business name, classify AMBIGUOUS + REVIEW, NOT COMPETITOR.
-9. Extract ONLY the shortest clear competitor/business name visibly present in the search term.
-   Never invent, expand, or infer a company name from outside knowledge.
-10. Normalize obvious query suffixes out of the competitor name: remove city/location, phone number,
-   photos, reviews, near me, and service-intent suffixes when they are not part of the visible brand name.
-3. Generic core-service searches without another brand are GENERIC SERVICE.
-4. Harekrishna / Hare Krishna terms are OWN BRAND and protected.
-5. A named old age home, nursing home, hospital or clinic is a COMPETITOR
-   or alternative-provider business and should normally be REVIEW.
-6. Generic old-age-home, nursing-home, hospital or clinic queries are not
-   the same as the business's core in-home service. Classify them as
-   AMBIGUOUS or UNRELATED when appropriate and normally REVIEW.
-11. Doctor / home-doctor queries are not automatically core services.
-   Without a clear brand, normally use AMBIGUOUS or UNRELATED + REVIEW.
-12. Massage, therapy, physiotherapy and similar non-core services are not
-   automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
-13. Wrong-location searches outside Hyderabad/Telangana should not be
-   automatically KEEP. Use AMBIGUOUS or UNRELATED + REVIEW when appropriate.
-14. Competitor terms should normally be REVIEW, not automatically blocked.
-15. If a competitor term converted, keep the action conservative and note
-    that it may be valuable traffic.
-16. Use ONLY the supplied search-term text and supplied metrics.
-17. Return one result for EVERY supplied Row ID.
-
-ALLOWED Type values:
-OWN BRAND
-COMPETITOR
-GENERIC SERVICE
-AMBIGUOUS
-UNRELATED
-
-ALLOWED Recommended Action values:
-KEEP
-REVIEW
-CONSIDER NEGATIVE
-
-ALLOWED Risk values:
-Low
-Medium
-High
-
-INPUT ROWS (maximum 15):
-{batch_context}
-
-RETURN ONLY VALID JSON.
-No Markdown. No code fences. No text before or after the JSON.
-
-Return a JSON array in this exact shape:
-[
-  {{
-    "row_id": 1,
-    "competitor_name": "Exact visible name or —",
-    "type": "COMPETITOR",
-    "recommended_action": "REVIEW",
-    "risk": "Medium",
-    "reason": "Short reason based only on this search term"
-  }}
-]
-
-For non-competitor rows, competitor_name must be "—".
-Keep each reason short.
-"""
-
-                                try:
-
-                                    competitor_ai_response = (
-                                        openai_client.responses.create(
-                                            model="gpt-5.4-mini",
-                                            input=competitor_prompt,
-                                            max_output_tokens=2200
-                                        )
-                                    )
-
-                                    raw_batch_text = (
-                                        competitor_ai_response.output_text
-                                        .strip()
-                                    )
-
-                                    if raw_batch_text.startswith("```"):
-                                        raw_lines = raw_batch_text.splitlines()
-                                        if raw_lines:
-                                            raw_lines = raw_lines[1:]
-                                        if raw_lines and raw_lines[-1].strip() == "```":
-                                            raw_lines = raw_lines[:-1]
-                                        raw_batch_text = "\n".join(
-                                            raw_lines
-                                        ).strip()
-
-                                    parsed_batch = json.loads(
-                                        raw_batch_text
-                                    )
-
-                                    if isinstance(parsed_batch, dict):
-                                        parsed_batch = parsed_batch.get(
-                                            "results",
-                                            []
-                                        )
-
-                                    if not isinstance(parsed_batch, list):
-                                        raise ValueError(
-                                            "AI response was not a JSON list."
-                                        )
-
-                                    valid_row_ids = set(
-                                        int(value)
-                                        for value in batch_df[
-                                            "Row ID"
-                                        ].tolist()
-                                    )
-
-                                    normalized_batch_rows = []
-
-                                    for item in parsed_batch:
-                                        if not isinstance(item, dict):
-                                            continue
-
-                                        try:
-                                            row_id = int(
-                                                item.get("row_id")
-                                            )
-                                        except Exception:
-                                            continue
-
-                                        if row_id not in valid_row_ids:
-                                            continue
-
-                                        normalized_batch_rows.append(
-                                            {
-                                                "Row ID": row_id,
-                                                "Competitor Name": str(
-                                                    item.get(
-                                                        "competitor_name",
-                                                        "—"
-                                                    )
-                                                ).strip() or "—",
-                                                "Type": str(
-                                                    item.get(
-                                                        "type",
-                                                        "AMBIGUOUS"
-                                                    )
-                                                ).strip().upper(),
-                                                "Recommended Action": str(
-                                                    item.get(
-                                                        "recommended_action",
-                                                        "REVIEW"
-                                                    )
-                                                ).strip().upper(),
-                                                "Risk": str(
-                                                    item.get(
-                                                        "risk",
-                                                        "Medium"
-                                                    )
-                                                ).strip().title(),
-                                                "Reason": str(
-                                                    item.get(
-                                                        "reason",
-                                                        "Review this term."
-                                                    )
-                                                ).strip()
-                                            }
-                                        )
-
-                                    returned_row_ids = {
-                                        row["Row ID"]
-                                        for row in normalized_batch_rows
-                                    }
-
-                                    missing_row_ids = (
-                                        valid_row_ids - returned_row_ids
-                                    )
-
-                                    if missing_row_ids:
-                                        raise ValueError(
-                                            "AI did not return every Row ID "
-                                            "in this batch."
-                                        )
-
-                                    batch_result_rows = normalized_batch_rows
-
-                                    competitor_batch_cache[
-                                        batch_cache_key
-                                    ] = batch_result_rows
-
-                                    st.session_state[
-                                        "competitor_batch_cache_v3"
-                                    ] = competitor_batch_cache
-
-                                    new_ai_batch_count += 1
-
-                                except Exception as competitor_batch_error:
-
-                                    batch_result_rows = []
-                                    failed_batch_count += 1
-
-                                    st.warning(
-                                        f"Batch {batch_number} could not be "
-                                        "completed. Successful earlier batches "
-                                        "remain cached."
-                                    )
-
-                                    st.caption(
-                                        f"Technical detail: "
-                                        f"{competitor_batch_error}"
-                                    )
-
-                            all_competitor_ai_rows.extend(
-                                batch_result_rows
-                            )
-
-                            competitor_progress.progress(
-                                batch_number / competitor_batch_count
-                            )
-
-                        competitor_status.empty()
-
-                        st.caption(
-                            f"AI batches: {competitor_batch_count} total | "
-                            f"{new_ai_batch_count} new call(s) | "
-                            f"{cached_batch_count} cached | "
-                            f"{failed_batch_count} failed"
-                        )
-
-                        if failed_batch_count == 0:
-                            st.success(
-                                "Full competitor candidate scan completed. "
-                                "All locally detected candidates were analyzed."
+                        if not positive_volumes.empty:
+                            high_volume_threshold = max(
+                                float(positive_volumes.median()),
+                                float(positive_volumes.quantile(0.75)),
                             )
                         else:
-                            st.warning(
-                                "Competitor scan is incomplete because one or "
-                                "more batches failed. Run again later; completed "
-                                "batches are cached and will not use AI again."
+                            high_volume_threshold = 0.0
+
+                        def growth_volume_opportunity(row):
+                            searches = growth_safe_float(row["Avg Monthly Searches"])
+                            conversions = growth_safe_float(row["Conversions"])
+                            cpa = growth_safe_float(row["CPA (₹)"])
+                            cost = growth_safe_float(row["Cost (₹)"])
+
+                            is_high_volume = (
+                                high_volume_threshold > 0
+                                and searches >= high_volume_threshold
                             )
 
-                        if all_competitor_ai_rows:
+                            if is_high_volume and conversions > 0:
+                                if overall_cpa <= 0 or (cpa > 0 and cpa <= overall_cpa * 1.20):
+                                    return "🏆 High-Volume Winner"
+                                return "🟠 High Volume / CPA Review"
+                            if is_high_volume and conversions == 0:
+                                return "⚠️ High Volume / No Conversion — Review"
+                            if conversions > 0:
+                                return "✅ Efficient Demand"
+                            if cost > 0:
+                                return "🟡 Monitor"
+                            return "⚪ Low Data"
 
-                            competitor_classification_df = pd.DataFrame(
-                                all_competitor_ai_rows
-                            ).drop_duplicates(
-                                subset=["Row ID"],
-                                keep="last"
+                        volume_perf_df["Market Signal"] = volume_perf_df.apply(
+                            growth_volume_opportunity,
+                            axis=1,
+                        )
+
+                        volume_perf_df = volume_perf_df.sort_values(
+                            ["Avg Monthly Searches", "Conversions", "Cost (₹)"],
+                            ascending=[False, False, False],
+                        )
+
+                        loaded_count = int(
+                            (volume_perf_df["Avg Monthly Searches"] > 0).sum()
+                        )
+                        max_volume = int(
+                            volume_perf_df["Avg Monthly Searches"].max()
+                            if not volume_perf_df.empty
+                            else 0
+                        )
+
+                        vol_metric1, vol_metric2, vol_metric3, vol_metric4 = st.columns(4)
+                        vol_metric1.metric("Planner Keywords Loaded", f"{loaded_count:,}")
+                        vol_metric2.metric("Highest Avg Monthly Searches", f"{max_volume:,}")
+                        vol_metric3.metric(
+                            "High-Volume Converters",
+                            f"{int(((volume_perf_df['Avg Monthly Searches'] >= high_volume_threshold) & (volume_perf_df['Conversions'] > 0)).sum()) if high_volume_threshold > 0 else 0:,}",
+                        )
+                        vol_metric4.metric(
+                            "High-Volume Review",
+                            f"{int(((volume_perf_df['Avg Monthly Searches'] >= high_volume_threshold) & (volume_perf_df['Conversions'] == 0)).sum()) if high_volume_threshold > 0 else 0:,}",
+                        )
+
+                        st.caption(
+                            f"Planner market: {planner_geo_name} • Language: {planner_language_name}. "
+                            "Search volume is market demand context; it does not automatically control bidding."
+                        )
+
+                        volume_display_columns = [
+                            "Keyword",
+                            "Avg Monthly Searches",
+                            "Competition",
+                            "Competition Index",
+                            "Top Page Bid Low (₹)",
+                            "Top Page Bid High (₹)",
+                            "Clicks",
+                            "Cost (₹)",
+                            "Conversions",
+                            "CPA (₹)",
+                            "Conversion Rate %",
+                            "Market Signal",
+                        ]
+
+                        st.dataframe(
+                            volume_perf_df[volume_display_columns].head(50),
+                            width="stretch",
+                            hide_index=True,
+                        )
+
+                        trend_keyword_options = volume_perf_df.loc[
+                            volume_perf_df["Avg Monthly Searches"] > 0,
+                            "Keyword",
+                        ].astype(str).tolist()
+
+                        if trend_keyword_options:
+                            selected_trend_keyword = st.selectbox(
+                                "12-Month Search Trend Keyword",
+                                trend_keyword_options,
+                                key="growth_volume_trend_keyword",
                             )
 
-                            competitor_results_df = competitor_candidate_df.merge(
-                                competitor_classification_df,
-                                on="Row ID",
-                                how="inner"
+                            trend_key = growth_normalize_keyword(selected_trend_keyword)
+                            trend_rows = planner_monthly_map.get(trend_key, [])
+
+                            if trend_rows:
+                                month_order = {
+                                    "JANUARY": 1,
+                                    "FEBRUARY": 2,
+                                    "MARCH": 3,
+                                    "APRIL": 4,
+                                    "MAY": 5,
+                                    "JUNE": 6,
+                                    "JULY": 7,
+                                    "AUGUST": 8,
+                                    "SEPTEMBER": 9,
+                                    "OCTOBER": 10,
+                                    "NOVEMBER": 11,
+                                    "DECEMBER": 12,
+                                }
+                                trend_df = pd.DataFrame(trend_rows)
+                                trend_df["Month Number"] = trend_df["Month"].map(
+                                    month_order
+                                ).fillna(0)
+                                trend_df = trend_df.sort_values(
+                                    ["Year", "Month Number"]
+                                )
+                                trend_df["Period"] = (
+                                    trend_df["Month"].str.title().str[:3]
+                                    + " "
+                                    + trend_df["Year"].astype(str)
+                                )
+                                st.line_chart(
+                                    trend_df.set_index("Period")[["Monthly Searches"]],
+                                    width="stretch",
+                                )
+                else:
+                    st.info(
+                        "Click **Load Hyderabad Search Volume** when you want fresh Keyword Planner metrics. "
+                        "It will not run automatically."
+                    )
+
+        # ==================================================
+        # TAB 3 — COMPETITOR INTELLIGENCE
+        # ==================================================
+
+        with growth_tab_competitors:
+            st.subheader("🏁 Competitor Intelligence")
+            st.caption(
+                "Two different signals are kept separate for accuracy: "
+                "Auction Competition shows domains that actually overlap your keywords; "
+                "Brand Search Scan shows competitor/provider names typed by users in Search Terms."
+            )
+
+            competitor_auction_tab, competitor_brand_tab = st.tabs(
+                [
+                    "⚔️ Keyword Auction Competition",
+                    "🔍 Competitor Brand Search Scan",
+                ]
+            )
+
+            # ----------------------------------------------
+            # REAL KEYWORD AUCTION COMPETITION
+            # ----------------------------------------------
+
+            with competitor_auction_tab:
+                st.markdown("#### ⚔️ Which competitor is fighting us on which keyword?")
+                st.caption(
+                    "Runs Google Ads Auction Insights on demand. No scan runs automatically. "
+                    "If the account/API does not return Auction Insights, the dashboard fails safely and the Brand Search Scan remains available."
+                )
+
+                auction_scope_key = (
+                    f"{analysis_scope_label}|{date_option}|"
+                    f"{start_date if 'start_date' in locals() else ''}|"
+                    f"{end_date if 'end_date' in locals() else ''}"
+                )
+
+                if st.button(
+                    "🏁 Run Keyword Auction Competitor Scan",
+                    key="growth_run_auction_competitor_scan",
+                    type="primary",
+                ):
+                    try:
+                        with st.spinner("Loading keyword-level Auction Insights..."):
+                            new_auction_df = growth_fetch_auction_insights(
+                                ga_service=ga_service,
+                                customer_id=customer_id,
+                                date_filter_clause=date_filter_clause,
                             )
 
-                            competitor_rows_df = competitor_results_df[
-                                competitor_results_df[
-                                    "Type"
-                                ] == "COMPETITOR"
+                            if (
+                                not new_auction_df.empty
+                                and selected_campaign != "All Campaigns"
+                            ):
+                                new_auction_df = new_auction_df[
+                                    new_auction_df["Campaign"] == selected_campaign
+                                ].copy()
+
+                        if (
+                            st.session_state.get("growth_auction_scope_key")
+                            == auction_scope_key
+                            and isinstance(
+                                st.session_state.get("growth_auction_current_df"),
+                                pd.DataFrame,
+                            )
+                        ):
+                            st.session_state["growth_auction_previous_df"] = (
+                                st.session_state["growth_auction_current_df"].copy()
+                            )
+                        else:
+                            st.session_state["growth_auction_previous_df"] = pd.DataFrame()
+
+                        st.session_state["growth_auction_current_df"] = new_auction_df
+                        st.session_state["growth_auction_scope_key"] = auction_scope_key
+                        st.session_state.pop("growth_auction_error", None)
+
+                    except Exception as auction_error:
+                        st.session_state["growth_auction_error"] = str(auction_error)
+
+                auction_error_text = st.session_state.get("growth_auction_error")
+                if auction_error_text:
+                    st.warning(
+                        "Auction Insights could not be loaded for this run. "
+                        "This can happen when the selected account/date range has insufficient Auction Insights data or the API does not expose it for that request."
+                    )
+                    st.caption(f"Technical detail: {auction_error_text}")
+
+                auction_df = st.session_state.get(
+                    "growth_auction_current_df",
+                    pd.DataFrame(),
+                )
+
+                if (
+                    isinstance(auction_df, pd.DataFrame)
+                    and not auction_df.empty
+                    and st.session_state.get("growth_auction_scope_key") == auction_scope_key
+                ):
+                    auction_display_df = auction_df.copy()
+
+                    if not keyword_summary_df.empty:
+                        own_keyword_metrics = keyword_summary_df[
+                            [
+                                "Keyword Key",
+                                "Clicks",
+                                "Cost (₹)",
+                                "Conversions",
+                                "CPA (₹)",
+                                "Conversion Rate %",
+                                "AI Signal",
+                            ]
+                        ].drop_duplicates("Keyword Key")
+
+                        auction_display_df = auction_display_df.merge(
+                            own_keyword_metrics,
+                            on="Keyword Key",
+                            how="left",
+                        )
+                    else:
+                        for column_name in [
+                            "Clicks",
+                            "Cost (₹)",
+                            "Conversions",
+                            "CPA (₹)",
+                            "Conversion Rate %",
+                            "AI Signal",
+                        ]:
+                            auction_display_df[column_name] = 0
+
+                    def auction_action(row):
+                        threat = str(row.get("Threat", ""))
+                        conversions = growth_safe_float(row.get("Conversions", 0))
+                        if "HIGH" in threat and conversions > 0:
+                            return "Protect winning keyword; review ad strength/bid later"
+                        if "HIGH" in threat:
+                            return "Review relevance + CPA before any bid increase"
+                        if "MEDIUM" in threat and conversions > 0:
+                            return "Monitor; defend profitable traffic"
+                        if "MEDIUM" in threat:
+                            return "Review ad/landing-page competitiveness"
+                        return "Monitor"
+
+                    auction_display_df["Recommended Action"] = (
+                        auction_display_df.apply(auction_action, axis=1)
+                    )
+
+                    auction_domain_rows = []
+                    for domain, domain_df in auction_display_df.groupby(
+                        "Competitor Domain",
+                        dropna=False,
+                    ):
+                        auction_domain_rows.append(
+                            {
+                                "Competitor Domain": domain,
+                                "Keywords Battled": int(domain_df["Keyword"].nunique()),
+                                "Avg Impression Share %": round(
+                                    float(domain_df["Competitor Impression Share %"].mean()),
+                                    2,
+                                ),
+                                "Avg Overlap Rate %": round(
+                                    float(domain_df["Overlap Rate %"].mean()),
+                                    2,
+                                ),
+                                "Avg Position Above %": round(
+                                    float(domain_df["Position Above Rate %"].mean()),
+                                    2,
+                                ),
+                                "Max Threat Score": round(
+                                    float(domain_df["Threat Score"].max()),
+                                    1,
+                                ),
+                                "Threat": growth_auction_risk(
+                                    float(domain_df["Threat Score"].max())
+                                ),
+                            }
+                        )
+
+                    auction_domain_df = pd.DataFrame(auction_domain_rows).sort_values(
+                        ["Max Threat Score", "Keywords Battled"],
+                        ascending=[False, False],
+                    )
+
+                    auc_m1, auc_m2, auc_m3, auc_m4 = st.columns(4)
+                    auc_m1.metric(
+                        "Auction Competitors",
+                        f"{auction_display_df['Competitor Domain'].nunique():,}",
+                    )
+                    auc_m2.metric(
+                        "Keywords With Competition",
+                        f"{auction_display_df['Keyword'].nunique():,}",
+                    )
+                    auc_m3.metric(
+                        "High-Threat Rows",
+                        f"{int(auction_display_df['Threat'].astype(str).str.contains('HIGH').sum()):,}",
+                    )
+                    auc_m4.metric(
+                        "Highest Threat Score",
+                        f"{float(auction_display_df['Threat Score'].max()):.1f}/100",
+                    )
+
+                    st.markdown("#### 🏢 Strongest Auction Competitors")
+                    st.dataframe(
+                        auction_domain_df,
+                        width="stretch",
+                        hide_index=True,
+                    )
+
+                    st.markdown("#### 🗺 Keyword Battle Map")
+                    battle_columns = [
+                        "Keyword",
+                        "Competitor Domain",
+                        "Campaign",
+                        "Ad Group",
+                        "Competitor Impression Share %",
+                        "Overlap Rate %",
+                        "Position Above Rate %",
+                        "Top Impression %",
+                        "Our Outranking Share %",
+                        "Threat Score",
+                        "Threat",
+                        "Clicks",
+                        "Cost (₹)",
+                        "Conversions",
+                        "CPA (₹)",
+                        "Recommended Action",
+                    ]
+                    battle_columns = [
+                        column
+                        for column in battle_columns
+                        if column in auction_display_df.columns
+                    ]
+
+                    st.dataframe(
+                        auction_display_df[battle_columns].sort_values(
+                            ["Threat Score", "Overlap Rate %"],
+                            ascending=[False, False],
+                        ),
+                        width="stretch",
+                        hide_index=True,
+                    )
+
+                    previous_auction_df = st.session_state.get(
+                        "growth_auction_previous_df",
+                        pd.DataFrame(),
+                    )
+
+                    if isinstance(previous_auction_df, pd.DataFrame) and not previous_auction_df.empty:
+                        previous_domain_rows = []
+                        for domain, domain_df in previous_auction_df.groupby(
+                            "Competitor Domain",
+                            dropna=False,
+                        ):
+                            previous_domain_rows.append(
+                                {
+                                    "Competitor Domain": domain,
+                                    "Previous Keywords Battled": int(
+                                        domain_df["Keyword"].nunique()
+                                    ),
+                                    "Previous Max Threat": round(
+                                        float(domain_df["Threat Score"].max()),
+                                        1,
+                                    ),
+                                }
+                            )
+
+                        previous_domain_df = pd.DataFrame(previous_domain_rows)
+                        auction_compare_df = auction_domain_df.merge(
+                            previous_domain_df,
+                            on="Competitor Domain",
+                            how="outer",
+                        ).fillna(0)
+                        auction_compare_df["Δ Keywords"] = (
+                            auction_compare_df["Keywords Battled"]
+                            - auction_compare_df["Previous Keywords Battled"]
+                        )
+                        auction_compare_df["Δ Threat"] = (
+                            auction_compare_df["Max Threat Score"]
+                            - auction_compare_df["Previous Max Threat"]
+                        ).round(1)
+
+                        with st.expander("📊 Current Run vs Previous Run"):
+                            st.dataframe(
+                                auction_compare_df[
+                                    [
+                                        "Competitor Domain",
+                                        "Keywords Battled",
+                                        "Previous Keywords Battled",
+                                        "Δ Keywords",
+                                        "Max Threat Score",
+                                        "Previous Max Threat",
+                                        "Δ Threat",
+                                    ]
+                                ].sort_values("Max Threat Score", ascending=False),
+                                width="stretch",
+                                hide_index=True,
+                            )
+                    else:
+                        st.caption(
+                            "Run the same scope again later to unlock Current Run vs Previous Run comparison."
+                        )
+
+                elif not auction_error_text:
+                    st.info(
+                        "Click **Run Keyword Auction Competitor Scan** to see exact keyword-to-domain competition."
+                    )
+
+            # ----------------------------------------------
+            # COMPETITOR BRAND SEARCH-TERM SCAN
+            # ----------------------------------------------
+
+            with competitor_brand_tab:
+                st.markdown("#### 🔍 Which competitor/provider names are users searching?")
+                st.caption(
+                    "Scans the full selected Search Terms dataset, protects your own brands and normal service phrases, "
+                    "then sends only likely brand/ambiguous candidates to AI in batches. Competitor terms are REVIEW only — never auto-blocked."
+                )
+
+                brand_scope_key = (
+                    f"{analysis_scope_label}|{date_option}|"
+                    f"{start_date if 'start_date' in locals() else ''}|"
+                    f"{end_date if 'end_date' in locals() else ''}"
+                )
+
+                if st.button(
+                    "🔍 Run Full Competitor Brand Scan",
+                    key="growth_run_brand_competitor_scan",
+                ):
+                    if "search_df" not in locals() or search_df.empty:
+                        st.session_state["growth_brand_scan_error"] = (
+                            "No Search Terms data is available for the selected scope."
+                        )
+                    else:
+                        try:
+                            brand_source_df = search_df.copy()
+                            brand_source_df["Search Term"] = (
+                                brand_source_df["Search Term"]
+                                .fillna("")
+                                .astype(str)
+                                .str.strip()
+                            )
+                            brand_source_df = brand_source_df[
+                                brand_source_df["Search Term"] != ""
+                            ].copy()
+                            brand_source_df["_Brand Candidate Score"] = (
+                                brand_source_df["Search Term"].apply(
+                                    growth_brand_candidate_score
+                                )
+                            )
+
+                            own_brand_df = brand_source_df[
+                                brand_source_df["Search Term"].apply(
+                                    growth_is_own_brand
+                                )
                             ].copy()
 
-                            competitor_rows_df = competitor_rows_df[
-                                competitor_rows_df[
-                                    "Competitor Name"
-                                ].fillna("—") != "—"
+                            brand_candidate_df = brand_source_df[
+                                brand_source_df["_Brand Candidate Score"] > 0
                             ].copy()
-
-                            st.subheader(
-                                "🏢 Competitor Names Detected"
+                            brand_candidate_df = brand_candidate_df.sort_values(
+                                ["_Brand Candidate Score", "Cost (₹)"],
+                                ascending=[False, False],
+                            ).reset_index(drop=True)
+                            brand_candidate_df["Row ID"] = range(
+                                1,
+                                len(brand_candidate_df) + 1,
                             )
 
-                            if competitor_rows_df.empty:
+                            brand_results = []
+                            brand_batch_size = 15
 
-                                st.info(
-                                    "No clear competitor business name was "
-                                    "detected in the successfully analyzed "
-                                    "candidate terms."
+                            with st.spinner(
+                                "Reviewing all likely competitor/brand candidates in safe AI batches..."
+                            ):
+                                for batch_start in range(
+                                    0,
+                                    len(brand_candidate_df),
+                                    brand_batch_size,
+                                ):
+                                    batch_df = brand_candidate_df.iloc[
+                                        batch_start:batch_start + brand_batch_size
+                                    ].copy()
+
+                                    batch_payload_columns = [
+                                        "Row ID",
+                                        "Search Term",
+                                        "Campaign",
+                                        "Impressions",
+                                        "Clicks",
+                                        "Cost (₹)",
+                                        "Conversions",
+                                    ]
+                                    if "_Campaign Calls" in batch_df.columns:
+                                        batch_payload_columns.append("_Campaign Calls")
+
+                                    batch_payload = batch_df[
+                                        [
+                                            column
+                                            for column in batch_payload_columns
+                                            if column in batch_df.columns
+                                        ]
+                                    ].to_dict("records")
+
+                                    competitor_prompt = f"""
+You are classifying Google Ads Search Terms for a Hyderabad home-care business.
+
+OWN BRANDS — NEVER CLASSIFY AS COMPETITOR:
+- Hare Krishna / Harekrishna Home Care Services
+- Shiva Kaartikeya / Shivakaartikeya Home Care Services
+
+CORE SERVICES — generic service phrases are NOT competitors:
+- elderly care, patient care, nursing care, nurse at home
+- caretaker, caregiver, baby care, babysitter, nanny
+- maid, domestic help, housekeeping, cook, home care
+
+Rules:
+1. COMPETITOR only when there is a clear, distinctive provider/business/facility/brand name.
+2. A location, locality, person's first name, common word, generic service phrase or unclear phrase is AMBIGUOUS/OTHER, not COMPETITOR.
+3. Named hospitals, clinics, nursing homes, old-age homes, home-care agencies or care brands can be COMPETITOR when clearly named.
+4. Do not infer a competitor from zero conversions or spend.
+5. Never recommend automatic blocking. Competitor terms must be REVIEW.
+6. Do not claim a specific Search Term caused a phone call. _Campaign Calls is campaign-level context only.
+7. Normalize obvious spelling variants to one concise canonical competitor name when possible.
+8. Return ONLY valid JSON array. One object per Row ID.
+
+Required JSON fields:
+- row_id: integer
+- type: one of COMPETITOR, AMBIGUOUS, OTHER
+- competitor_name: canonical name or empty string
+- confidence: integer 0-100
+- action: REVIEW or KEEP
+- reason: short factual reason
+
+DATA:
+{json.dumps(batch_payload, ensure_ascii=False, default=str)}
+"""
+
+                                    try:
+                                        response = openai_client.responses.create(
+                                            model="gpt-5.4-mini",
+                                            input=competitor_prompt,
+                                            max_output_tokens=2200,
+                                        )
+                                        parsed_rows = growth_extract_json_array(
+                                            response.output_text
+                                        )
+                                    except Exception as batch_error:
+                                        parsed_rows = []
+                                        for _, fallback_row in batch_df.iterrows():
+                                            parsed_rows.append(
+                                                {
+                                                    "row_id": int(fallback_row["Row ID"]),
+                                                    "type": "AMBIGUOUS",
+                                                    "competitor_name": "",
+                                                    "confidence": 0,
+                                                    "action": "REVIEW",
+                                                    "reason": (
+                                                        "AI batch unavailable; kept for manual review. "
+                                                        f"Technical: {batch_error}"
+                                                    )[:220],
+                                                }
+                                            )
+
+                                    parsed_map = {}
+                                    for parsed in parsed_rows:
+                                        try:
+                                            parsed_id = int(parsed.get("row_id"))
+                                        except (TypeError, ValueError):
+                                            continue
+                                        parsed_map[parsed_id] = parsed
+
+                                    for _, source_row in batch_df.iterrows():
+                                        row_id = int(source_row["Row ID"])
+                                        parsed = parsed_map.get(
+                                            row_id,
+                                            {
+                                                "type": "AMBIGUOUS",
+                                                "competitor_name": "",
+                                                "confidence": 0,
+                                                "action": "REVIEW",
+                                                "reason": "No AI classification returned; manual review required.",
+                                            },
+                                        )
+
+                                        classification = str(
+                                            parsed.get("type", "AMBIGUOUS")
+                                        ).upper().strip()
+                                        if classification not in {
+                                            "COMPETITOR",
+                                            "AMBIGUOUS",
+                                            "OTHER",
+                                        }:
+                                            classification = "AMBIGUOUS"
+
+                                        competitor_name = re.sub(
+                                            r"\s+",
+                                            " ",
+                                            str(parsed.get("competitor_name", "")),
+                                        ).strip()
+
+                                        if (
+                                            classification != "COMPETITOR"
+                                            or not competitor_name
+                                            or growth_is_own_brand(competitor_name)
+                                        ):
+                                            competitor_name = ""
+                                            if classification == "COMPETITOR":
+                                                classification = "AMBIGUOUS"
+
+                                        campaign_calls = growth_safe_float(
+                                            source_row.get("_Campaign Calls", 0)
+                                        )
+
+                                        result_row = source_row.to_dict()
+                                        result_row.update(
+                                            {
+                                                "Type": classification,
+                                                "Competitor Name": competitor_name or "—",
+                                                "Confidence": int(
+                                                    max(
+                                                        0,
+                                                        min(
+                                                            100,
+                                                            growth_safe_float(
+                                                                parsed.get("confidence", 0)
+                                                            ),
+                                                        ),
+                                                    )
+                                                ),
+                                                "Recommended Action": (
+                                                    "REVIEW"
+                                                    if classification in {"COMPETITOR", "AMBIGUOUS"}
+                                                    else "KEEP"
+                                                ),
+                                                "Review Risk": growth_competitor_review_risk(
+                                                    source_row.get("Cost (₹)", 0),
+                                                    source_row.get("Conversions", 0),
+                                                    campaign_calls,
+                                                    overall_cpa,
+                                                    overall_cpc,
+                                                ),
+                                                "Reason": str(
+                                                    parsed.get("reason", "Manual review")
+                                                )[:220],
+                                            }
+                                        )
+                                        brand_results.append(result_row)
+
+                            brand_results_df = pd.DataFrame(brand_results)
+
+                            if brand_results_df.empty:
+                                brand_summary_df = pd.DataFrame()
+                            else:
+                                competitor_rows_df = brand_results_df[
+                                    (brand_results_df["Type"] == "COMPETITOR")
+                                    & (brand_results_df["Competitor Name"] != "—")
+                                ].copy()
+
+                                competitor_rows_df["Competitor Key"] = (
+                                    competitor_rows_df["Competitor Name"].apply(
+                                        growth_competitor_key
+                                    )
                                 )
 
-                            else:
-
-                                competitor_summary_rows = []
-
-                                for competitor_name, group_df in (
-                                    competitor_rows_df.groupby(
-                                        "Competitor Name",
-                                        dropna=False
-                                    )
+                                brand_summary_rows = []
+                                for competitor_key, group_df in competitor_rows_df.groupby(
+                                    "Competitor Key",
+                                    dropna=False,
                                 ):
-
-                                    search_terms_text = "; ".join(
-                                        sorted(
-                                            set(
-                                                group_df[
-                                                    "Search Term"
-                                                ].astype(str).tolist()
-                                            )
-                                        )
+                                    names = [
+                                        str(v)
+                                        for v in group_df["Competitor Name"].tolist()
+                                        if str(v).strip() and str(v) != "—"
+                                    ]
+                                    canonical_name = (
+                                        sorted(names, key=len)[0]
+                                        if names
+                                        else str(competitor_key)
+                                    )
+                                    impressions = float(group_df["Impressions"].sum())
+                                    clicks = float(group_df["Clicks"].sum())
+                                    spend = float(group_df["Cost (₹)"].sum())
+                                    conversions = float(group_df["Conversions"].sum())
+                                    campaign_calls_context = (
+                                        float(group_df["_Campaign Calls"].max())
+                                        if "_Campaign Calls" in group_df.columns
+                                        else 0.0
                                     )
 
-                                    competitor_summary_rows.append(
+                                    brand_summary_rows.append(
                                         {
-                                            "Competitor Name": competitor_name,
-                                            "Search Terms": search_terms_text,
-                                            "Clicks": float(
-                                                group_df["Clicks"].sum()
+                                            "Competitor Key": competitor_key,
+                                            "Competitor Name": canonical_name,
+                                            "Search Terms": int(group_df["Search Term"].nunique()),
+                                            "Impressions": int(impressions),
+                                            "Clicks": int(clicks),
+                                            "Spend (₹)": round(spend, 2),
+                                            "Conversions": round(conversions, 2),
+                                            "CTR %": round(
+                                                clicks / impressions * 100 if impressions else 0,
+                                                2,
                                             ),
-                                            "Spend (₹)": float(
-                                                group_df["Cost (₹)"].sum()
+                                            "Avg CPC (₹)": round(
+                                                spend / clicks if clicks else 0,
+                                                2,
                                             ),
-                                            "Conversions": float(
-                                                group_df[
-                                                    "Conversions"
-                                                ].sum()
-                                            )
+                                            "Review Risk": growth_competitor_review_risk(
+                                                spend,
+                                                conversions,
+                                                campaign_calls_context,
+                                                overall_cpa,
+                                                overall_cpc,
+                                            ),
                                         }
                                     )
 
-                                competitor_summary_df = pd.DataFrame(
-                                    competitor_summary_rows
-                                ).sort_values(
-                                    "Spend (₹)",
-                                    ascending=False
+                                brand_summary_df = pd.DataFrame(brand_summary_rows)
+                                if not brand_summary_df.empty:
+                                    brand_summary_df = brand_summary_df.sort_values(
+                                        ["Spend (₹)", "Search Terms"],
+                                        ascending=[False, False],
+                                    )
+
+                            if (
+                                st.session_state.get("growth_brand_scope_key")
+                                == brand_scope_key
+                                and isinstance(
+                                    st.session_state.get("growth_brand_summary_df"),
+                                    pd.DataFrame,
                                 )
-
-                                result_col1, result_col2, result_col3, result_col4 = (
-                                    st.columns(4)
-                                )
-
-                                with result_col1:
-                                    st.metric(
-                                        "Unique Competitors",
-                                        f"{len(competitor_summary_df):,}"
-                                    )
-
-                                with result_col2:
-                                    st.metric(
-                                        "Competitor Search Terms",
-                                        f"{len(competitor_rows_df):,}"
-                                    )
-
-                                with result_col3:
-                                    st.metric(
-                                        "Competitor Spend",
-                                        f"₹{float(competitor_rows_df['Cost (₹)'].sum()):,.2f}"
-                                    )
-
-                                with result_col4:
-                                    st.metric(
-                                        "Competitor Conversions",
-                                        f"{float(competitor_rows_df['Conversions'].sum()):,.1f}"
-                                    )
-
-                                st.dataframe(
-                                    competitor_summary_df,
-                                    width="stretch",
-                                    hide_index=True
-                                )
-
-                                st.subheader(
-                                    "🔎 Competitor Search Terms"
-                                )
-
-                                competitor_display_columns = [
-                                    "Search Term",
-                                    "Competitor Name"
-                                ]
-
-                                if "Campaign" in competitor_rows_df.columns:
-                                    competitor_display_columns.append(
-                                        "Campaign"
-                                    )
-
-                                competitor_display_columns.extend(
-                                    [
-                                        "Clicks",
-                                        "Cost (₹)",
-                                        "Conversions",
-                                        "Recommended Action",
-                                        "Risk",
-                                        "Reason"
-                                    ]
-                                )
-
-                                st.dataframe(
-                                    competitor_rows_df[
-                                        competitor_display_columns
-                                    ].sort_values(
-                                        "Cost (₹)",
-                                        ascending=False
-                                    ),
-                                    width="stretch",
-                                    hide_index=True
-                                )
-
-                                converted_competitor_df = competitor_rows_df[
-                                    competitor_rows_df[
-                                        "Conversions"
-                                    ] > 0
-                                ]
-
-                                zero_conversion_competitor_df = competitor_rows_df[
-                                    competitor_rows_df[
-                                        "Conversions"
-                                    ] == 0
-                                ]
-
-                                if not converted_competitor_df.empty:
-                                    st.success(
-                                        f"{len(converted_competitor_df):,} "
-                                        "competitor search term(s) converted. "
-                                        "Review carefully before blocking them."
-                                    )
-
-                                if not zero_conversion_competitor_df.empty:
-                                    st.warning(
-                                        f"₹{float(zero_conversion_competitor_df['Cost (₹)'].sum()):,.2f} "
-                                        "was spent on competitor terms with zero "
-                                        "conversions. Review before adding negatives."
-                                    )
-
-                            if not own_brand_df.empty:
-
-                                with st.expander(
-                                    "🛡 Own Brand Terms Protected"
-                                ):
-
-                                    own_brand_display_columns = [
-                                        "Search Term"
-                                    ]
-
-                                    if "Campaign" in own_brand_df.columns:
-                                        own_brand_display_columns.append(
-                                            "Campaign"
-                                        )
-
-                                    own_brand_display_columns.extend(
-                                        [
-                                            "Clicks",
-                                            "Cost (₹)",
-                                            "Conversions"
-                                        ]
-                                    )
-
-                                    st.dataframe(
-                                        own_brand_df[
-                                            own_brand_display_columns
-                                        ],
-                                        width="stretch",
-                                        hide_index=True
-                                    )
-
-                            with st.expander(
-                                "📋 Show All AI-Reviewed Candidate Terms"
                             ):
-
-                                all_review_columns = [
-                                    "Search Term",
-                                    "Competitor Name"
-                                ]
-
-                                if "Campaign" in competitor_results_df.columns:
-                                    all_review_columns.append("Campaign")
-
-                                all_review_columns.extend(
-                                    [
-                                        "Clicks",
-                                        "Cost (₹)",
-                                        "Conversions",
-                                        "Type",
-                                        "Recommended Action",
-                                        "Risk",
-                                        "Reason"
-                                    ]
+                                st.session_state["growth_brand_previous_summary_df"] = (
+                                    st.session_state["growth_brand_summary_df"].copy()
                                 )
+                            else:
+                                st.session_state["growth_brand_previous_summary_df"] = pd.DataFrame()
 
-                                st.dataframe(
-                                    competitor_results_df[
-                                        all_review_columns
-                                    ].sort_values(
-                                        "Cost (₹)",
-                                        ascending=False
-                                    ),
-                                    width="stretch",
-                                    hide_index=True
-                                )
+                            st.session_state["growth_brand_scope_key"] = brand_scope_key
+                            st.session_state["growth_brand_results_df"] = brand_results_df
+                            st.session_state["growth_brand_summary_df"] = brand_summary_df
+                            st.session_state["growth_brand_own_brand_df"] = own_brand_df
+                            st.session_state["growth_brand_scanned_count"] = len(brand_source_df)
+                            st.session_state["growth_brand_candidate_count"] = len(brand_candidate_df)
+                            st.session_state.pop("growth_brand_scan_error", None)
 
-                        else:
-
-                            st.error(
-                                "No competitor AI batch could be completed. "
-                                "Check API credit/rate limits and try again later."
+                        except Exception as brand_scan_error:
+                            st.session_state["growth_brand_scan_error"] = str(
+                                brand_scan_error
                             )
 
-                else:
+                brand_scan_error_text = st.session_state.get(
+                    "growth_brand_scan_error"
+                )
+                if brand_scan_error_text:
+                    st.warning(brand_scan_error_text)
 
-                    st.info(
-                        "No search-term data is available for competitor analysis."
+                brand_summary_df = st.session_state.get(
+                    "growth_brand_summary_df",
+                    pd.DataFrame(),
+                )
+                brand_results_df = st.session_state.get(
+                    "growth_brand_results_df",
+                    pd.DataFrame(),
+                )
+
+                brand_results_are_current = (
+                    st.session_state.get("growth_brand_scope_key") == brand_scope_key
+                )
+
+                if brand_results_are_current:
+                    brand_scanned_count = int(
+                        st.session_state.get("growth_brand_scanned_count", 0)
+                    )
+                    brand_candidate_count = int(
+                        st.session_state.get("growth_brand_candidate_count", 0)
                     )
 
-        else:
+                    brand_m1, brand_m2, brand_m3, brand_m4 = st.columns(4)
+                    brand_m1.metric("Search Terms Scanned", f"{brand_scanned_count:,}")
+                    brand_m2.metric("AI Candidates", f"{brand_candidate_count:,}")
+                    brand_m3.metric(
+                        "Unique Competitors",
+                        f"{len(brand_summary_df) if isinstance(brand_summary_df, pd.DataFrame) else 0:,}",
+                    )
+                    brand_m4.metric(
+                        "Competitor Review Spend",
+                        f"₹{float(brand_summary_df['Spend (₹)'].sum()):,.2f}"
+                        if isinstance(brand_summary_df, pd.DataFrame)
+                        and not brand_summary_df.empty
+                        else "₹0.00",
+                    )
 
-            st.info(
-                "Search term data is not available for competitor analysis."
-            )
+                    if isinstance(brand_summary_df, pd.DataFrame) and not brand_summary_df.empty:
+                        st.markdown("#### 🏢 Competitor Brands Detected")
+                        st.dataframe(
+                            brand_summary_df[
+                                [
+                                    "Competitor Name",
+                                    "Search Terms",
+                                    "Impressions",
+                                    "Clicks",
+                                    "Spend (₹)",
+                                    "Conversions",
+                                    "CTR %",
+                                    "Avg CPC (₹)",
+                                    "Review Risk",
+                                ]
+                            ],
+                            width="stretch",
+                            hide_index=True,
+                        )
+
+                        previous_brand_df = st.session_state.get(
+                            "growth_brand_previous_summary_df",
+                            pd.DataFrame(),
+                        )
+
+                        if isinstance(previous_brand_df, pd.DataFrame) and not previous_brand_df.empty:
+                            compare_df = brand_summary_df.merge(
+                                previous_brand_df[
+                                    [
+                                        "Competitor Key",
+                                        "Spend (₹)",
+                                        "Search Terms",
+                                    ]
+                                ].rename(
+                                    columns={
+                                        "Spend (₹)": "Previous Spend (₹)",
+                                        "Search Terms": "Previous Search Terms",
+                                    }
+                                ),
+                                on="Competitor Key",
+                                how="outer",
+                            ).fillna(0)
+
+                            compare_df["Δ Spend (₹)"] = (
+                                compare_df["Spend (₹)"]
+                                - compare_df["Previous Spend (₹)"]
+                            ).round(2)
+                            compare_df["Δ Search Terms"] = (
+                                compare_df["Search Terms"]
+                                - compare_df["Previous Search Terms"]
+                            )
+
+                            with st.expander("📊 Current Run vs Previous Run"):
+                                st.dataframe(
+                                    compare_df[
+                                        [
+                                            "Competitor Name",
+                                            "Spend (₹)",
+                                            "Previous Spend (₹)",
+                                            "Δ Spend (₹)",
+                                            "Search Terms",
+                                            "Previous Search Terms",
+                                            "Δ Search Terms",
+                                        ]
+                                    ].sort_values("Spend (₹)", ascending=False),
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+                        else:
+                            st.caption(
+                                "Run the same scope again later to compare competitor-brand search activity with the previous run."
+                            )
+                    else:
+                        st.success(
+                            "No clear competitor brand/provider name was detected in the reviewed candidates."
+                        )
+
+                    if isinstance(brand_results_df, pd.DataFrame) and not brand_results_df.empty:
+                        with st.expander("📋 Show All AI-Reviewed Brand Candidates"):
+                            review_columns = [
+                                "Search Term",
+                                "Competitor Name",
+                                "Campaign",
+                                "Impressions",
+                                "Clicks",
+                                "Cost (₹)",
+                                "Conversions",
+                                "Type",
+                                "Confidence",
+                                "Recommended Action",
+                                "Review Risk",
+                                "Reason",
+                            ]
+                            review_columns = [
+                                column
+                                for column in review_columns
+                                if column in brand_results_df.columns
+                            ]
+                            st.dataframe(
+                                brand_results_df[review_columns].sort_values(
+                                    "Cost (₹)",
+                                    ascending=False,
+                                ),
+                                width="stretch",
+                                hide_index=True,
+                            )
+
+                    own_brand_df = st.session_state.get(
+                        "growth_brand_own_brand_df",
+                        pd.DataFrame(),
+                    )
+                    if isinstance(own_brand_df, pd.DataFrame) and not own_brand_df.empty:
+                        with st.expander("🛡 Own Brand Terms Protected"):
+                            protected_columns = [
+                                "Search Term",
+                                "Campaign",
+                                "Impressions",
+                                "Clicks",
+                                "Cost (₹)",
+                                "Conversions",
+                            ]
+                            protected_columns = [
+                                column
+                                for column in protected_columns
+                                if column in own_brand_df.columns
+                            ]
+                            st.dataframe(
+                                own_brand_df[protected_columns],
+                                width="stretch",
+                                hide_index=True,
+                            )
+                elif not brand_scan_error_text:
+                    st.info(
+                        "Click **Run Full Competitor Brand Scan** only when you want to analyze competitor/provider searches. It will not run automatically."
+                    )
+
+                st.warning(
+                    "Safety rule retained: competitor or ambiguous Search Terms are REVIEW items. "
+                    "They are never automatically added as negatives, and zero conversions alone never proves waste."
+                )
+
 
 
         # ==================================================
@@ -3564,13 +4517,19 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         selected_spend = (
             float(filtered_df["Cost (₹)"].sum())
             if "Cost (₹)" in filtered_df.columns
-            else 0
+            else 0.0
+        )
+
+        selected_clicks = (
+            float(filtered_df["Clicks"].sum())
+            if "Clicks" in filtered_df.columns
+            else 0.0
         )
 
         selected_conversions = (
             float(filtered_df["Conversions"].sum())
             if "Conversions" in filtered_df.columns
-            else 0
+            else 0.0
         )
 
         selected_calls = (
@@ -3582,7 +4541,13 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         selected_cpa = (
             selected_spend / selected_conversions
             if selected_conversions > 0
-            else 0
+            else 0.0
+        )
+
+        selected_conversion_rate = (
+            (selected_conversions / selected_clicks) * 100
+            if selected_clicks > 0
+            else 0.0
         )
 
         waste_amount = 0.0
@@ -3606,27 +4571,79 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         waste_ratio = (
             (waste_amount / selected_spend) * 100
             if selected_spend > 0
-            else 0
+            else 0.0
+        )
+
+        review_ratio = (
+            (review_amount / selected_spend) * 100
+            if selected_spend > 0
+            else 0.0
         )
 
         # -----------------------------
-        # WASTE RISK SCORE
+        # WEIGHTED WASTE RISK SCORE V2
         # -----------------------------
+        # Confirmed/clear irrelevant spend receives full risk weight.
+        # Review Spend is uncertain, so it receives only partial weight.
+        # CPA and conversion-rate pressure add efficiency risk.
+        # Campaign-level phone calls are context only and never automatically
+        # erase or prove search-term waste.
 
-        if waste_ratio >= 30:
-            waste_risk_score = 90
+        confirmed_waste_points = min(
+            60.0,
+            waste_ratio * 2.0
+        )
+
+        review_exposure_points = min(
+            25.0,
+            review_ratio * 0.30
+        )
+
+        cpa_pressure_points = 0.0
+
+        if selected_spend > 0 and selected_conversions <= 0:
+            cpa_pressure_points = 20.0
+        elif selected_cpa >= 2500:
+            cpa_pressure_points = 20.0
+        elif selected_cpa >= 1800:
+            cpa_pressure_points = 15.0
+        elif selected_cpa >= 1200:
+            cpa_pressure_points = 10.0
+        elif selected_cpa >= 800:
+            cpa_pressure_points = 5.0
+
+        conversion_rate_points = 0.0
+
+        # Avoid overreacting to tiny click samples.
+        if selected_clicks >= 20:
+            if selected_conversion_rate < 2:
+                conversion_rate_points = 15.0
+            elif selected_conversion_rate < 4:
+                conversion_rate_points = 10.0
+            elif selected_conversion_rate < 6:
+                conversion_rate_points = 5.0
+
+        waste_risk_score = int(
+            round(
+                min(
+                    100.0,
+                    confirmed_waste_points
+                    + review_exposure_points
+                    + cpa_pressure_points
+                    + conversion_rate_points
+                )
+            )
+        )
+
+        if waste_risk_score >= 80:
             waste_risk_status = "🔴 Critical"
-        elif waste_ratio >= 20:
-            waste_risk_score = 75
+        elif waste_risk_score >= 60:
             waste_risk_status = "🟠 High"
-        elif waste_ratio >= 10:
-            waste_risk_score = 50
+        elif waste_risk_score >= 40:
             waste_risk_status = "🟡 Moderate"
-        elif waste_ratio > 0:
-            waste_risk_score = 25
+        elif waste_risk_score >= 20:
             waste_risk_status = "🟢 Low"
         else:
-            waste_risk_score = 0
             waste_risk_status = "🟢 Very Low"
 
         risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
@@ -3658,128 +4675,146 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         st.progress(waste_risk_score / 100)
 
         st.write(
-            f"Potential waste represents **{waste_ratio:.1f}%** "
-            f"of selected spend. Google Ads reported calls: **{selected_calls}**."
+            f"Confirmed potential waste is **{waste_ratio:.1f}%** of selected spend; "
+            f"Review Spend is **{review_ratio:.1f}%**. "
+            f"Selected CPA: **₹{selected_cpa:,.2f}** | "
+            f"Conversion Rate: **{selected_conversion_rate:.2f}%** | "
+            f"Google Ads reported calls: **{selected_calls}**."
         )
 
         st.caption(
-            "Potential Waste is limited to zero-conversion search terms with clear irrelevant "
-            "intent such as jobs, vacancies, salary, courses or training. Other zero-conversion "
-            "terms stay in Review Spend. Google Ads phone_calls are campaign-level context only, "
-            "so a campaign call never proves that a specific search term generated a call."
+            "Risk score V2 = confirmed-waste exposure + 30% weighted Review Spend + "
+            "CPA pressure + conversion-rate pressure. Review Spend is not treated as "
+            "automatic waste. Google Ads phone_calls are campaign-level context only, "
+            "so calls do not automatically remove search-term risk."
         )
 
         # -----------------------------
-        # BUDGET INTELLIGENCE
+        # BUDGET INTELLIGENCE V2
         # -----------------------------
 
         st.subheader("💰 Budget Reallocation Suggestions")
 
         budget_actions = []
 
+        if waste_amount > 0:
+            budget_actions.append(
+                f"🔴 **₹{waste_amount:,.2f} is clear Potential Waste.** "
+                "Review those irrelevant-intent search terms first and add safe negative keywords."
+            )
+
         if review_amount > 0:
             budget_actions.append(
-                f"🟡 **₹{review_amount:,.2f} is Review Spend, not automatic waste.** "
-                "These are zero-conversion terms without a clear irrelevant-intent signal. "
-                "Review search intent, campaign fit and call quality before blocking them."
+                f"🟡 **₹{review_amount:,.2f} is Review Spend.** "
+                "It is zero-conversion spend without a clear irrelevant-intent signal; "
+                "review search intent, campaign fit and call quality before blocking it."
             )
 
-        # Critical / high waste = do NOT increase budget
-        if waste_ratio >= 20:
+        if waste_risk_score >= 60:
             budget_actions.append(
                 "🔴 **Do not increase total budget yet.** "
-                "Waste spend is too high. Reduce irrelevant traffic first."
+                "Risk is high; clean search terms and improve conversion efficiency first."
             )
-
+        elif waste_risk_score >= 40:
             budget_actions.append(
-                "🚫 **Priority:** Review search terms and add negative keywords "
-                "before scaling any campaign."
+                "🟡 **Hold broad budget increases for now.** "
+                "Optimize high-spend zero-conversion traffic and CPA before scaling."
+            )
+        elif waste_risk_score >= 20:
+            budget_actions.append(
+                "🟢 **Scale only selectively.** "
+                "Risk is controlled but Review Spend still needs monitoring."
+            )
+        else:
+            budget_actions.append(
+                "🟢 **Waste risk is currently low.** "
+                "Any budget increase should still depend on CPA, lead quality and conversion trend."
             )
 
-            if selected_cpa > 1500:
+        # Campaign-level CPA message — never call a single selected campaign
+        # the 'strongest' campaign because there is nothing to compare it with.
+        if selected_campaign != "All Campaigns":
+            if selected_conversions > 0:
+                if selected_cpa >= 1800:
+                    budget_actions.append(
+                        f"🟠 **Selected campaign CPA is ₹{selected_cpa:,.2f}.** "
+                        "Improve efficiency before increasing its budget."
+                    )
+                else:
+                    budget_actions.append(
+                        f"🟢 **Selected campaign CPA is ₹{selected_cpa:,.2f}.** "
+                        "Scale carefully only if lead quality is acceptable."
+                    )
+            elif selected_spend > 0:
                 budget_actions.append(
-                    f"🟠 **CPA is high at ₹{selected_cpa:,.2f}.** "
-                    "Improve conversion efficiency before increasing spend."
+                    f"🔴 **Selected campaign spent ₹{selected_spend:,.2f} with zero conversions.** "
+                    "Review targeting, search terms and conversion tracking before adding budget."
                 )
 
-        elif waste_ratio >= 10:
-            budget_actions.append(
-                "🟡 **Hold major budget increases.** "
-                "Clean search terms and reduce waste first."
-            )
-
         else:
-            # Only recommend scaling when waste is controlled
-            if not filtered_df.empty:
-                budget_df = filtered_df.copy()
-
-                if (
-                    "Cost (₹)" in budget_df.columns
-                    and "Conversions" in budget_df.columns
-                ):
-
-                    budget_df["AI CPA"] = budget_df.apply(
-                        lambda row:
-                            row["Cost (₹)"] / row["Conversions"]
-                            if row["Conversions"] > 0
-                            else float("inf"),
-                        axis=1
-                    )
-
-                    converting_df = budget_df[
-                        budget_df["Conversions"] > 0
-                    ].copy()
-
-                    if not converting_df.empty:
-                        best_campaign = converting_df.loc[
-                            converting_df["AI CPA"].idxmin()
-                        ]
-
-                        best_campaign_name = (
-                            best_campaign["Campaign"]
-                            if "Campaign" in converting_df.columns
-                            else "Best-performing campaign"
-                        )
-
-                        budget_actions.append(
-                            "🟢 **Increase carefully:** "
-                            f"{best_campaign_name} has the strongest CPA "
-                            f"at ₹{best_campaign['AI CPA']:,.2f}."
-                        )
-
-        # Zero-conversion spend check
-        if not filtered_df.empty:
-            if (
+            if not filtered_df.empty and (
                 "Cost (₹)" in filtered_df.columns
                 and "Conversions" in filtered_df.columns
             ):
-                zero_conversion_df = filtered_df[
-                    (filtered_df["Cost (₹)"] > 0)
-                    & (filtered_df["Conversions"] == 0)
+                budget_df = filtered_df.copy()
+
+                budget_df["AI CPA"] = budget_df.apply(
+                    lambda row: (
+                        row["Cost (₹)"] / row["Conversions"]
+                        if row["Conversions"] > 0
+                        else float("inf")
+                    ),
+                    axis=1
+                )
+
+                converting_df = budget_df[
+                    budget_df["Conversions"] > 0
+                ].copy()
+
+                if len(converting_df) >= 2:
+                    best_campaign = converting_df.loc[
+                        converting_df["AI CPA"].idxmin()
+                    ]
+
+                    best_campaign_name = (
+                        best_campaign["Campaign"]
+                        if "Campaign" in converting_df.columns
+                        else "Best-performing campaign"
+                    )
+
+                    budget_actions.append(
+                        "🟢 **Selective reallocation candidate:** "
+                        f"{best_campaign_name} currently has the lowest CPA "
+                        f"at ₹{best_campaign['AI CPA']:,.2f}."
+                    )
+
+                zero_conversion_df = budget_df[
+                    (budget_df["Cost (₹)"] > 0)
+                    & (budget_df["Conversions"] == 0)
                 ].copy()
 
                 if not zero_conversion_df.empty:
-                    highest_waste_campaign = zero_conversion_df.loc[
+                    highest_zero_campaign = zero_conversion_df.loc[
                         zero_conversion_df["Cost (₹)"].idxmax()
                     ]
 
                     zero_campaign_name = (
-                        highest_waste_campaign["Campaign"]
+                        highest_zero_campaign["Campaign"]
                         if "Campaign" in zero_conversion_df.columns
                         else "Zero-conversion campaign"
                     )
 
                     budget_actions.append(
-                        "🔴 **Reduce or pause for review:** "
+                        "🔴 **Review before funding further:** "
                         f"{zero_campaign_name} spent "
-                        f"₹{highest_waste_campaign['Cost (₹)']:,.2f} "
+                        f"₹{highest_zero_campaign['Cost (₹)']:,.2f} "
                         "with zero conversions."
                     )
 
         if not budget_actions:
             budget_actions.append(
                 "🟢 Current budget distribution looks stable. "
-                "Continue monitoring CPA, conversion rate, and waste spend."
+                "Continue monitoring CPA, conversion rate and search-term quality."
             )
 
         for i, action in enumerate(
@@ -3791,36 +4826,41 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
             )
 
         # -----------------------------
-        # TOP 5 ACTIONS NOW
+        # TOP 5 ACTIONS NOW V2
         # -----------------------------
 
         st.subheader("🎯 Top 5 Actions Now")
 
         top_actions = []
 
-        if waste_ratio >= 10:
+        if waste_amount > 0:
             top_actions.append(
-                "Review search terms and add negative keywords."
+                "Add safe negative keywords for clear irrelevant-intent search terms."
             )
 
-        if selected_cpa > 1500:
+        if review_ratio >= 20:
+            top_actions.append(
+                "Review the highest-spend zero-conversion search terms before scaling."
+            )
+
+        if selected_cpa >= 1500:
             top_actions.append(
                 "Reduce high-CPA traffic before increasing budget."
             )
 
-        if "health_ctr" in locals() and health_ctr < 3:
+        if selected_clicks >= 20 and selected_conversion_rate < 5:
             top_actions.append(
-                "Improve ad copy and keyword relevance to raise CTR."
-            )
-
-        if "health_conversion_rate" in locals() and health_conversion_rate < 5:
-            top_actions.append(
-                "Improve landing page and lead conversion flow."
+                "Improve landing-page and lead-conversion flow."
             )
 
         if selected_conversions > 0:
             top_actions.append(
-                "Protect campaigns producing real conversions."
+                "Protect converting search intent and avoid broad negative keywords."
+            )
+
+        if selected_calls > 0:
+            top_actions.append(
+                "Check call quality and confirm valuable calls are tracked as conversions."
             )
 
         if not top_actions:
@@ -5350,30 +6390,77 @@ JSON SCHEMA:
                                 .copy()
                             )
 
-                        elif (
-                            competitor_question
-                            and "competitor_candidate_df" in locals()
-                            and not competitor_candidate_df.empty
-                        ):
-                            competitor_ask_columns = [
-                                "Search Term",
-                                "Campaign",
-                                "Clicks",
-                                "Cost (₹)",
-                                "Conversions"
-                            ]
-
-                            competitor_ask_columns = [
-                                col
-                                for col in competitor_ask_columns
-                                if col in competitor_candidate_df.columns
-                            ]
-
-                            selected_search_terms_for_ai = (
-                                competitor_candidate_df[competitor_ask_columns]
-                                .head(15)
-                                .copy()
+                        elif competitor_question:
+                            # Prefer the saved Brand Scan results when the user has
+                            # explicitly run them for the current scope. Otherwise use
+                            # only a conservative local candidate filter; do not invent
+                            # confirmed competitors.
+                            saved_brand_results = st.session_state.get(
+                                "growth_brand_results_df",
+                                pd.DataFrame(),
                             )
+                            saved_brand_is_current = (
+                                st.session_state.get("growth_brand_scope_key")
+                                == brand_scope_key
+                            )
+
+                            if (
+                                saved_brand_is_current
+                                and isinstance(saved_brand_results, pd.DataFrame)
+                                and not saved_brand_results.empty
+                            ):
+                                saved_brand_subset = saved_brand_results[
+                                    saved_brand_results["Type"].isin(
+                                        ["COMPETITOR", "AMBIGUOUS"]
+                                    )
+                                ].copy()
+
+                                competitor_ask_columns = [
+                                    "Search Term",
+                                    "Campaign",
+                                    "Clicks",
+                                    "Cost (₹)",
+                                    "Conversions",
+                                    "Type",
+                                    "Competitor Name",
+                                    "Confidence",
+                                    "Recommended Action",
+                                ]
+                                competitor_ask_columns = [
+                                    col
+                                    for col in competitor_ask_columns
+                                    if col in saved_brand_subset.columns
+                                ]
+                                selected_search_terms_for_ai = (
+                                    saved_brand_subset[competitor_ask_columns]
+                                    .sort_values("Cost (₹)", ascending=False)
+                                    .head(15)
+                                    .copy()
+                                )
+                            else:
+                                local_candidate_mask = search_terms_for_ai[
+                                    "Search Term"
+                                ].apply(
+                                    lambda term: growth_brand_candidate_score(term) > 0
+                                )
+                                local_candidate_df = search_terms_for_ai[
+                                    local_candidate_mask
+                                ].copy()
+
+                                if not local_candidate_df.empty:
+                                    selected_search_terms_for_ai = (
+                                        local_candidate_df
+                                        .sort_values("Cost (₹)", ascending=False)
+                                        .head(15)
+                                        .copy()
+                                    )
+                                else:
+                                    selected_search_terms_for_ai = (
+                                        search_terms_for_ai
+                                        .sort_values("Cost (₹)", ascending=False)
+                                        .head(15)
+                                        .copy()
+                                    )
 
                         elif matched_service_terms:
                             service_mask = search_terms_for_ai[
@@ -5471,6 +6558,84 @@ JSON SCHEMA:
                     )
 
                     search_terms_available = False
+
+                # ==================================================
+                # COMPETITOR CONTEXT FOR ASK AI
+                # ==================================================
+
+                competitor_context = (
+                    "No current competitor scan result has been loaded. "
+                    "Do not invent competitor names or auction metrics."
+                )
+
+                if competitor_question:
+                    competitor_context_parts = []
+
+                    saved_auction_df = st.session_state.get(
+                        "growth_auction_current_df",
+                        pd.DataFrame(),
+                    )
+                    if (
+                        st.session_state.get("growth_auction_scope_key")
+                        == auction_scope_key
+                        and isinstance(saved_auction_df, pd.DataFrame)
+                        and not saved_auction_df.empty
+                    ):
+                        auction_context_columns = [
+                            "Keyword",
+                            "Competitor Domain",
+                            "Campaign",
+                            "Overlap Rate %",
+                            "Position Above Rate %",
+                            "Competitor Impression Share %",
+                            "Threat Score",
+                            "Threat",
+                        ]
+                        auction_context_columns = [
+                            col
+                            for col in auction_context_columns
+                            if col in saved_auction_df.columns
+                        ]
+                        competitor_context_parts.append(
+                            "AUCTION INSIGHTS (confirmed keyword/domain overlap):\n"
+                            + saved_auction_df[auction_context_columns]
+                            .sort_values("Threat Score", ascending=False)
+                            .head(15)
+                            .to_string(index=False)
+                        )
+
+                    saved_brand_summary = st.session_state.get(
+                        "growth_brand_summary_df",
+                        pd.DataFrame(),
+                    )
+                    if (
+                        st.session_state.get("growth_brand_scope_key")
+                        == brand_scope_key
+                        and isinstance(saved_brand_summary, pd.DataFrame)
+                        and not saved_brand_summary.empty
+                    ):
+                        brand_context_columns = [
+                            "Competitor Name",
+                            "Search Terms",
+                            "Clicks",
+                            "Spend (₹)",
+                            "Conversions",
+                            "Review Risk",
+                        ]
+                        brand_context_columns = [
+                            col
+                            for col in brand_context_columns
+                            if col in saved_brand_summary.columns
+                        ]
+                        competitor_context_parts.append(
+                            "COMPETITOR BRAND SEARCHES (user query intent, not auction overlap):\n"
+                            + saved_brand_summary[brand_context_columns]
+                            .head(15)
+                            .to_string(index=False)
+                        )
+
+                    if competitor_context_parts:
+                        competitor_context = "\n\n".join(competitor_context_parts)
 
                 # ==================================================
                 # BEFORE VS AFTER CONTEXT
@@ -5651,6 +6816,9 @@ JSON SCHEMA:
         SEARCH TERMS DATA (QUESTION-RELEVANT / IMPORTANT, MAX 15 WITH SPEND):
         {search_terms_context}
 
+        COMPETITOR INTELLIGENCE (only if a scan was run for this scope):
+        {competitor_context}
+
         BEFORE VS AFTER DATA:
         {before_after_context}
 
@@ -5678,7 +6846,8 @@ JSON SCHEMA:
                     ask_ai_cache_key = (
                         f"v5|{current_ai_period}|{selected_campaign}|{total_calls}|"
                         f"{question}|{ask_campaign_context}|"
-                        f"{search_terms_context}|{before_after_context}"
+                        f"{search_terms_context}|{competitor_context}|"
+                        f"{before_after_context}"
                     )
 
                     if (
