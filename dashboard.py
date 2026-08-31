@@ -21,7 +21,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-08-31-final-multi-v10-policy-exemption"
+CAMPAIGN_BUILDER_BUILD = "2026-08-31-final-multi-v11-policy-clear"
 
 CAMPAIGN_BUILDER_PROTECTED_NEGATIVE_PHRASES = (
     "hare krishna",
@@ -657,6 +657,70 @@ def campaign_builder_validation_fingerprint(payload, policy_exemptions=None):
             "policy_exemptions_by_operation": policy_exemptions or {},
         }
     )
+
+
+def campaign_builder_validate_policy_exemption_map(payload, mapping):
+    """Locally verify exemption keys point only to keyword mutate operations."""
+    manifest = campaign_builder_operation_manifest(payload or {})
+    clean = {}
+    total_keys = 0
+
+    for raw_index, rows in (mapping or {}).items():
+        try:
+            op_index = int(raw_index)
+        except Exception as exc:
+            raise ValueError(f"Invalid policy exemption operation index: {raw_index}") from exc
+
+        if op_index < 0 or op_index >= len(manifest):
+            raise ValueError(
+                f"Policy exemption operation index {op_index} is outside the current request."
+            )
+
+        meta = manifest[op_index]
+        if meta.get("kind") != "keyword":
+            raise ValueError(
+                f"Policy exemption operation {op_index} does not point to a keyword operation."
+            )
+
+        valid_rows = []
+        for row in rows or []:
+            policy_name = str((row or {}).get("policy_name", "") or "").strip()
+            violating_text = str((row or {}).get("violating_text", "") or "").strip()
+            if not policy_name:
+                raise ValueError(
+                    f"Policy exemption for operation {op_index} is missing policy_name."
+                )
+            normalized = {
+                "policy_name": policy_name,
+                "violating_text": violating_text,
+            }
+            if normalized not in valid_rows:
+                valid_rows.append(normalized)
+
+        if valid_rows:
+            clean[str(op_index)] = valid_rows
+            total_keys += len(valid_rows)
+
+    if not clean:
+        raise ValueError("No usable policy exemption keys are available for re-validation.")
+
+    return clean, total_keys
+
+
+def campaign_builder_merge_policy_exemption_maps(*maps):
+    """Merge returned exemption keys without duplicating PolicyViolationKey values."""
+    merged = {}
+    for mapping in maps:
+        for op_index, rows in (mapping or {}).items():
+            bucket = merged.setdefault(str(op_index), [])
+            for row in rows or []:
+                normalized = {
+                    "policy_name": str((row or {}).get("policy_name", "") or "").strip(),
+                    "violating_text": str((row or {}).get("violating_text", "") or "").strip(),
+                }
+                if normalized["policy_name"] and normalized not in bucket:
+                    bucket.append(normalized)
+    return merged
 
 
 def campaign_builder_policy_error_rows(error, payload=None):
@@ -6844,7 +6908,7 @@ JSON SCHEMA:
                         "campaign_builder_policy_candidate_map",
                         "campaign_builder_policy_candidate_reason",
                         "campaign_builder_policy_candidate_eligible",
-                        "campaign_builder_policy_approval",
+                        "campaign_builder_policy_cleared",
                     ):
                         st.session_state.pop(state_key, None)
 
@@ -6999,7 +7063,7 @@ JSON SCHEMA:
                             "campaign_builder_policy_candidate_map",
                             "campaign_builder_policy_candidate_reason",
                             "campaign_builder_policy_candidate_eligible",
-                            "campaign_builder_policy_approval",
+                            "campaign_builder_policy_cleared",
                         ):
                             st.session_state.pop(state_key, None)
 
@@ -7084,30 +7148,41 @@ JSON SCHEMA:
                     if candidate_eligible:
                         st.info(
                             "Google marked every returned keyword policy violation as exemptible. "
-                            "Re-validation below uses the exact PolicyViolationKey values returned by Google. "
-                            "Validate Only still creates nothing. The actual exemption request is submitted only with the final PAUSED create request."
+                            "The button below is the manual approval step: it attaches the exact PolicyViolationKey values "
+                            "returned by Google and re-validates only. It does not create, enable, or spend anything."
                         )
-                        approve_policy_exemptions = st.checkbox(
-                            "I reviewed these exemptible keyword policy violations and approve using all shown exemption keys.",
-                            key="campaign_builder_policy_approval",
+                        st.caption(
+                            f"Ready to request exemption for {sum(len(v) for v in candidate_map.values())} policy key(s) "
+                            f"across {len(candidate_map)} keyword operation(s)."
                         )
                         revalidate_with_exemptions = st.button(
-                            "🛡️ Re-Validate with Approved Exemptions — No Changes",
+                            "🛡️ Approve All Exemptible Keywords & Re-Validate — No Changes",
                             key="campaign_builder_revalidate_policy_exemptions",
-                            disabled=not approve_policy_exemptions,
                             width="stretch",
                         )
                         if revalidate_with_exemptions:
                             try:
+                                clean_candidate_map, exemption_key_count = (
+                                    campaign_builder_validate_policy_exemption_map(
+                                        builder_core_payload, candidate_map
+                                    )
+                                )
                                 with st.spinner(
-                                    "Re-validating the full campaign with approved Google policy exemption keys..."
+                                    "Applying the returned exemption keys to the exact keyword operations and re-validating..."
                                 ):
                                     resolved_location = campaign_builder_resolve_location(
                                         client, builder_location
                                     )
                                     exempt_payload = dict(builder_core_payload)
                                     exempt_payload["location_resource_name"] = resolved_location["resource_name"]
-                                    exempt_payload["policy_exemptions_by_operation"] = candidate_map
+                                    exempt_payload["policy_exemptions_by_operation"] = clean_candidate_map
+                                    audit_info = campaign_builder_request_audit(
+                                        client, customer_id, exempt_payload
+                                    )
+                                    if int(audit_info.get("approved_policy_exemption_keys", 0)) != int(exemption_key_count):
+                                        raise ValueError(
+                                            "Local exemption audit mismatch: not every approved policy key was attached to the request."
+                                        )
                                     campaign_builder_mutate(
                                         client,
                                         ga_service,
@@ -7118,17 +7193,21 @@ JSON SCHEMA:
 
                                 st.session_state[
                                     "campaign_builder_validated_policy_exemptions"
-                                ] = candidate_map
+                                ] = clean_candidate_map
                                 st.session_state[
                                     "campaign_builder_validated_fingerprint"
                                 ] = campaign_builder_validation_fingerprint(
-                                    builder_core_payload, candidate_map
+                                    builder_core_payload, clean_candidate_map
                                 )
                                 st.session_state[
                                     "campaign_builder_validated_location"
                                 ] = resolved_location
+                                st.session_state["campaign_builder_policy_cleared"] = True
                                 st.success(
-                                    "✅ EXEMPTION RE-VALIDATION PASS — Google accepted the full request with the approved exemption keys. Nothing was created."
+                                    "✅ POLICY PROBLEM CLEARED IN VALIDATION — Google accepted the full request with the approved exemption keys. Nothing was created."
+                                )
+                                st.caption(
+                                    "The same approved keys are locked to this exact draft and will be included only if you later confirm PAUSED creation."
                                 )
                             except Exception as exemption_validate_error:
                                 st.session_state.pop(
@@ -7137,12 +7216,30 @@ JSON SCHEMA:
                                 st.session_state.pop(
                                     "campaign_builder_validated_policy_exemptions", None
                                 )
-                                st.error("❌ EXEMPTION RE-VALIDATION FAILED")
+                                st.session_state["campaign_builder_policy_cleared"] = False
+                                followup_analysis = campaign_builder_extract_policy_exemptions(
+                                    exemption_validate_error,
+                                    exempt_payload if "exempt_payload" in locals() else builder_core_payload,
+                                )
+                                if followup_analysis.get("rows"):
+                                    merged_map = campaign_builder_merge_policy_exemption_maps(
+                                        candidate_map, followup_analysis.get("exemptions_by_operation", {})
+                                    )
+                                    st.session_state["campaign_builder_policy_candidate_rows"] = followup_analysis.get("rows", [])
+                                    st.session_state["campaign_builder_policy_candidate_map"] = merged_map
+                                    st.session_state["campaign_builder_policy_candidate_eligible"] = bool(
+                                        followup_analysis.get("eligible", False)
+                                    )
+                                    st.session_state["campaign_builder_policy_candidate_reason"] = followup_analysis.get("reason", "")
+                                st.error("❌ POLICY EXEMPTION RE-VALIDATION FAILED")
                                 st.code(
                                     campaign_builder_format_google_ads_error(
                                         exemption_validate_error,
                                         exempt_payload if "exempt_payload" in locals() else builder_core_payload,
                                     )
+                                )
+                                st.caption(
+                                    "If Google returns the same exemptible policy again after the correct keys were attached, the keyword cannot be cleared automatically in this builder; edit/remove that keyword or review the policy in Google Ads."
                                 )
                     else:
                         st.warning(
@@ -7172,6 +7269,10 @@ JSON SCHEMA:
                     if validated_policy_exemptions:
                         st.success(
                             "✅ Current draft is validated with approved policy exemption keys and ready for PAUSED creation."
+                        )
+                        st.caption(
+                            f"Policy status: CLEARED FOR THIS VALIDATED REQUEST • Approved exemption keys: "
+                            f"{sum(len(v) for v in validated_policy_exemptions.values())}"
                         )
                         st.caption(
                             "The final create request will include the same approved exemption keys. Campaign creation remains PAUSED."
