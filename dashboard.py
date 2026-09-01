@@ -21,6 +21,8 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
+CAMPAIGN_BUILDER_BUILD = "2026-09-01-final-multi-v12-keyword-decision"
+
 CAMPAIGN_BUILDER_PROTECTED_NEGATIVE_PHRASES = (
     "hare krishna",
     "harekrishna",
@@ -287,6 +289,175 @@ def campaign_builder_keyword_lines(rows):
     )
 
 
+def campaign_builder_keyword_key(value):
+    """Stable normalized key for matching draft keywords to account history/planner aliases."""
+    return re.sub(r"\s+", " ", str(value or "").strip().casefold())
+
+
+def campaign_builder_keyword_intent_score(keyword, service):
+    """Conservative intent score. It never uses search volume alone as proof of quality."""
+    text = campaign_builder_keyword_key(keyword)
+    service_key = str(service or "").strip()
+
+    clear_irrelevant = (
+        "job", "jobs", "vacancy", "vacancies", "career", "salary",
+        "course", "courses", "training", "institute", "certification",
+        "syllabus", "exam", "pdf", "meaning", "definition", "resume", "cv",
+    )
+    if any(re.search(rf"\b{re.escape(token)}\b", text) for token in clear_irrelevant):
+        return 0
+
+    service_terms = {
+        "Elderly Care": ("elderly", "senior", "old age", "aged", "elder care"),
+        "Patient Care": ("patient", "attendant", "bedridden", "post surgery"),
+        "Nursing Care": ("nursing", "nurse", "home nurse"),
+        "Baby Care": ("baby care", "babysitter", "nanny", "baby sitter"),
+        "Caretaker": ("caretaker", "care taker", "caregiver", "attendant"),
+        "Domestic Help / Maid": ("maid", "domestic help", "housekeeper", "housekeeping", "cook"),
+    }
+
+    score = 35
+    if any(term in text for term in service_terms.get(service_key, ())):
+        score += 30
+    if any(term in text for term in ("at home", "home care", "services", "service", "near me", "hyderabad")):
+        score += 20
+    if len(text.split()) >= 3:
+        score += 10
+    elif len(text.split()) <= 1:
+        score -= 15
+
+    return max(0, min(100, int(score)))
+
+
+def campaign_builder_keyword_recommendation(
+    keyword,
+    service,
+    impressions=0,
+    clicks=0,
+    cost=0.0,
+    conversions=0.0,
+    ctr=0.0,
+    cpc=0.0,
+    cpa=0.0,
+    benchmark_ctr=0.0,
+    benchmark_cpc=0.0,
+    benchmark_cpa=0.0,
+    planner_searches=None,
+    planner_competition_index=None,
+    planner_bid_low=None,
+    planner_bid_high=None,
+):
+    """Conservative 0-100 keyword decision support. Never changes bids automatically."""
+    impressions = float(impressions or 0)
+    clicks = float(clicks or 0)
+    cost = float(cost or 0)
+    conversions = float(conversions or 0)
+    ctr = float(ctr or 0)
+    cpc = float(cpc or 0)
+    cpa = float(cpa or 0)
+    benchmark_ctr = float(benchmark_ctr or 0)
+    benchmark_cpc = float(benchmark_cpc or 0)
+    benchmark_cpa = float(benchmark_cpa or 0)
+    intent = campaign_builder_keyword_intent_score(keyword, service)
+    has_history = impressions > 0 or clicks > 0 or cost > 0 or conversions > 0
+
+    if intent == 0:
+        return 0, "🔴 AVOID", "Clearly irrelevant/job/informational intent."
+
+    # Actual Google Ads conversion performance gets first priority.
+    if has_history:
+        score = 25 + round(intent * 0.20)
+        if conversions > 0:
+            score += 35
+            if benchmark_cpa <= 0 or (cpa > 0 and cpa <= benchmark_cpa):
+                score += 15
+            elif cpa > 0 and benchmark_cpa > 0 and cpa <= benchmark_cpa * 1.25:
+                score += 8
+            if benchmark_ctr > 0 and ctr >= benchmark_ctr:
+                score += 8
+            if benchmark_cpc > 0 and cpc > 0 and cpc <= benchmark_cpc:
+                score += 7
+            score = max(0, min(100, int(score)))
+            if benchmark_cpa > 0 and cpa > benchmark_cpa * 1.50:
+                return score, "🟠 REVIEW", "Converts, but CPA is >50% above the current benchmark."
+            return score, "🟢 ADD", "Actual conversions are recorded; prioritize conversion quality and CPA."
+
+        if benchmark_ctr > 0 and ctr >= benchmark_ctr:
+            score += 10
+        if benchmark_cpc > 0 and cpc > 0 and cpc <= benchmark_cpc:
+            score += 10
+
+        high_no_conversion_spend = (
+            (benchmark_cpa > 0 and cost >= benchmark_cpa * 1.25)
+            or (benchmark_cpa <= 0 and cost >= 1200)
+        )
+        if clicks >= 10 and high_no_conversion_spend:
+            score -= 25
+            return max(0, min(100, int(score))), "🔴 AVOID", "Enough clicks/spend but no recorded conversions; do not add without review."
+        if clicks >= 5:
+            return max(0, min(100, int(score))), "🟠 REVIEW", "Has actual traffic but no conversions yet; inspect search terms and landing-page intent."
+        return max(0, min(100, int(score))), "🟡 TEST", "Limited actual history; test with controlled spend before judging."
+
+    # New keywords: relevance first, Planner second. Search volume alone never makes a keyword good.
+    score = 35 + round(intent * 0.40)
+    planner_loaded = planner_searches is not None
+    if planner_loaded:
+        searches = float(planner_searches or 0)
+        competition_index = float(planner_competition_index or 0)
+        if searches >= 200:
+            score += 12
+        elif searches >= 50:
+            score += 9
+        elif searches >= 10:
+            score += 5
+        elif searches <= 0:
+            score -= 8
+        if 0 < competition_index <= 60:
+            score += 4
+        elif competition_index >= 90:
+            score -= 4
+
+    score = max(0, min(100, int(score)))
+    if intent >= 70 and planner_loaded and float(planner_searches or 0) >= 50:
+        return score, "🟢 ADD", "Strong service intent with useful Planner demand; start conservatively."
+    if intent >= 55:
+        if planner_loaded and float(planner_searches or 0) <= 0:
+            return score, "🟠 REVIEW", "Relevant new keyword, but Planner currently shows no measurable demand."
+        return score, "🟡 TEST", "Relevant new keyword; test because no actual conversion history exists yet."
+    if planner_loaded and float(planner_searches or 0) <= 0:
+        return score, "🔴 AVOID", "Weak service intent plus no measurable Planner demand."
+    return score, "🟠 REVIEW", "New keyword with weaker service/transaction intent."
+
+
+def campaign_builder_keyword_overlap_map(rows):
+    """Flag very similar keywords within the same service without auto-removing them."""
+    result = {}
+    stop = {"a", "an", "the", "in", "for", "of", "at", "to", "near", "me"}
+    prepared = []
+    for row in rows or []:
+        key = row.get("Keyword Key") or campaign_builder_keyword_key(row.get("Keyword", ""))
+        tokens = {t for t in re.findall(r"[a-z0-9]+", key) if t not in stop}
+        prepared.append((row.get("Service", ""), key, row.get("Keyword", ""), tokens))
+    for i, (service, key, label, tokens) in enumerate(prepared):
+        best = (0.0, "")
+        if not tokens:
+            result[key] = ("—", "")
+            continue
+        for j, (service2, key2, label2, tokens2) in enumerate(prepared):
+            if i == j or service != service2 or not tokens2:
+                continue
+            union = tokens | tokens2
+            similarity = len(tokens & tokens2) / len(union) if union else 0.0
+            if similarity > best[0]:
+                best = (similarity, label2)
+        if best[0] >= 0.80:
+            result[key] = ("⚠️ HIGH", f"Similar to: {best[1]}")
+        elif best[0] >= 0.60:
+            result[key] = ("🟡 MEDIUM", f"Overlap with: {best[1]}")
+        else:
+            result[key] = ("✅ LOW", "Distinct enough")
+    return result
+
 def campaign_builder_valid_url(url):
     try:
         parsed = urlparse(str(url or "").strip())
@@ -300,26 +471,353 @@ def campaign_builder_fingerprint(payload):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def campaign_builder_format_google_ads_error(error):
+def campaign_builder_operation_manifest(payload):
+    """Return metadata aligned 1:1 with campaign_builder_build_operations()."""
+    manifest = [
+        {"kind": "campaign_budget", "label": "Campaign Budget"},
+        {"kind": "campaign", "label": "Campaign"},
+        {"kind": "location", "label": "Location Target"},
+    ]
+
+    for language_id in payload.get("language_ids", []):
+        manifest.append(
+            {
+                "kind": "language",
+                "label": "Language Target",
+                "language_id": language_id,
+            }
+        )
+
+    ad_groups = payload.get("ad_groups")
+    if not ad_groups:
+        ad_groups = [
+            {
+                "service": payload.get("service", "Service"),
+                "ad_group_name": payload.get("ad_group_name", "Ad Group"),
+                "keywords": payload.get("keywords", []),
+                "negative_keywords": payload.get("negative_keywords", []),
+                "headlines": payload.get("headlines", []),
+                "descriptions": payload.get("descriptions", []),
+                "final_url": payload.get("final_url", ""),
+            }
+        ]
+
+    for group in ad_groups:
+        service = group.get("service", "Service")
+        ad_group_name = group.get("ad_group_name", service)
+        manifest.append(
+            {
+                "kind": "ad_group",
+                "label": "Ad Group",
+                "service": service,
+                "ad_group": ad_group_name,
+            }
+        )
+
+        for row in group.get("keywords", []):
+            manifest.append(
+                {
+                    "kind": "keyword",
+                    "label": "Positive Keyword",
+                    "service": service,
+                    "ad_group": ad_group_name,
+                    "keyword": row.get("text", ""),
+                    "match_type": row.get("match_type", "PHRASE"),
+                    "negative": False,
+                }
+            )
+
+        for row in group.get("negative_keywords", []):
+            manifest.append(
+                {
+                    "kind": "keyword",
+                    "label": "Negative Keyword",
+                    "service": service,
+                    "ad_group": ad_group_name,
+                    "keyword": row.get("text", ""),
+                    "match_type": row.get("match_type", "PHRASE"),
+                    "negative": True,
+                }
+            )
+
+        manifest.append(
+            {
+                "kind": "rsa",
+                "label": "Responsive Search Ad",
+                "service": service,
+                "ad_group": ad_group_name,
+            }
+        )
+
+    return manifest
+
+
+def campaign_builder_error_operation_index(item):
+    """Extract the mutate operation index from GoogleAdsError.location."""
+    location = getattr(item, "location", None)
+    if not location:
+        return None
+
+    for element in getattr(location, "field_path_elements", []):
+        if getattr(element, "field_name", "") != "mutate_operations":
+            continue
+        try:
+            return int(element.index)
+        except Exception:
+            return None
+    return None
+
+
+def campaign_builder_extract_policy_exemptions(error, payload=None):
+    """Return policy rows plus exemption keys mapped to mutate operation indexes.
+
+    Google recommends resubmitting keyword operations with every exemptible
+    PolicyViolationKey only when all returned failures are exemptible policy
+    violations. The mapping is kept by mutate-operation index so the exact
+    keyword operation receives the exact exemption key(s).
+    """
+    result = {
+        "rows": [],
+        "exemptions_by_operation": {},
+        "eligible": False,
+        "reason": "",
+    }
+    if not isinstance(error, GoogleAdsException):
+        result["reason"] = "The failure was not a Google Ads policy exception."
+        return result
+
+    manifest = campaign_builder_operation_manifest(payload or {}) if payload else []
+    all_errors = list(error.failure.errors)
+    if not all_errors:
+        result["reason"] = "Google Ads returned no policy error details."
+        return result
+
+    every_error_exemptible_policy = True
+
+    for item in all_errors:
+        op_index = campaign_builder_error_operation_index(item)
+        meta = (
+            manifest[op_index]
+            if op_index is not None and 0 <= op_index < len(manifest)
+            else {}
+        )
+
+        details = getattr(item, "details", None)
+        policy = getattr(details, "policy_violation_details", None) if details else None
+        key = getattr(policy, "key", None) if policy else None
+        is_exemptible = bool(getattr(policy, "is_exemptible", False)) if policy else False
+
+        external_name = str(getattr(policy, "external_policy_name", "") or "").strip()
+        external_description = str(
+            getattr(policy, "external_policy_description", "") or ""
+        ).strip()
+        policy_name = str(getattr(key, "policy_name", "") or "").strip()
+        violating_text = str(getattr(key, "violating_text", "") or "").strip()
+
+        field_path = " > ".join(
+            str(getattr(element, "field_name", "") or "")
+            for element in getattr(getattr(item, "location", None), "field_path_elements", [])
+            if getattr(element, "field_name", "")
+        )
+        is_keyword_error = "keyword" in field_path.casefold()
+
+        trigger_text = ""
+        trigger = getattr(item, "trigger", None)
+        if trigger:
+            for attr in ("string_value", "int64_value", "double_value", "boolean_value"):
+                value = getattr(trigger, attr, None)
+                if value not in (None, "", 0, False):
+                    trigger_text = str(value)
+                    break
+
+        keyword = str(meta.get("keyword", "") or "").strip() or violating_text or trigger_text
+
+        if is_keyword_error or policy is not None:
+            result["rows"].append(
+                {
+                    "Operation": op_index if op_index is not None else "—",
+                    "Ad Group": meta.get("ad_group", "—"),
+                    "Service": meta.get("service", "—"),
+                    "Keyword Type": meta.get("label", "Keyword"),
+                    "Problem Keyword": keyword or "Not returned by API",
+                    "Match Type": meta.get("match_type", "—"),
+                    "Policy": external_name or policy_name or "Policy violation",
+                    "Violating Text": violating_text or trigger_text or "—",
+                    "Exemptible": "Yes" if is_exemptible else "No",
+                    "Recommended Action": (
+                        "Eligible for manual exemption review."
+                        if is_exemptible and key is not None
+                        else "Edit or remove this keyword, then validate again."
+                    ),
+                    "Policy Description": external_description or "—",
+                }
+            )
+
+        # Google documents exemption resubmission only when every returned error
+        # is an exemptible policy violation and has a usable PolicyViolationKey.
+        if not (
+            is_keyword_error
+            and policy is not None
+            and is_exemptible
+            and key is not None
+            and op_index is not None
+            and policy_name
+        ):
+            every_error_exemptible_policy = False
+            continue
+
+        op_key = str(op_index)
+        result["exemptions_by_operation"].setdefault(op_key, [])
+        key_row = {
+            "policy_name": policy_name,
+            "violating_text": violating_text,
+        }
+        if key_row not in result["exemptions_by_operation"][op_key]:
+            result["exemptions_by_operation"][op_key].append(key_row)
+
+    result["eligible"] = bool(
+        every_error_exemptible_policy and result["exemptions_by_operation"]
+    )
+    if result["eligible"]:
+        result["reason"] = (
+            "All returned failures are exemptible keyword policy violations. "
+            "You can manually approve the exemption keys and re-validate without changes."
+        )
+    else:
+        result["reason"] = (
+            "Automatic exemption re-validation is disabled because at least one returned "
+            "failure is non-exemptible, non-policy, or missing a policy key."
+        )
+
+    return result
+
+
+def campaign_builder_validation_fingerprint(payload, policy_exemptions=None):
+    """Fingerprint the editable draft together with any approved exemption keys."""
+    return campaign_builder_fingerprint(
+        {
+            "draft": payload,
+            "policy_exemptions_by_operation": policy_exemptions or {},
+        }
+    )
+
+
+def campaign_builder_validate_policy_exemption_map(payload, mapping):
+    """Locally verify exemption keys point only to keyword mutate operations."""
+    manifest = campaign_builder_operation_manifest(payload or {})
+    clean = {}
+    total_keys = 0
+
+    for raw_index, rows in (mapping or {}).items():
+        try:
+            op_index = int(raw_index)
+        except Exception as exc:
+            raise ValueError(f"Invalid policy exemption operation index: {raw_index}") from exc
+
+        if op_index < 0 or op_index >= len(manifest):
+            raise ValueError(
+                f"Policy exemption operation index {op_index} is outside the current request."
+            )
+
+        meta = manifest[op_index]
+        if meta.get("kind") != "keyword":
+            raise ValueError(
+                f"Policy exemption operation {op_index} does not point to a keyword operation."
+            )
+
+        valid_rows = []
+        for row in rows or []:
+            policy_name = str((row or {}).get("policy_name", "") or "").strip()
+            violating_text = str((row or {}).get("violating_text", "") or "").strip()
+            if not policy_name:
+                raise ValueError(
+                    f"Policy exemption for operation {op_index} is missing policy_name."
+                )
+            normalized = {
+                "policy_name": policy_name,
+                "violating_text": violating_text,
+            }
+            if normalized not in valid_rows:
+                valid_rows.append(normalized)
+
+        if valid_rows:
+            clean[str(op_index)] = valid_rows
+            total_keys += len(valid_rows)
+
+    if not clean:
+        raise ValueError("No usable policy exemption keys are available for re-validation.")
+
+    return clean, total_keys
+
+
+def campaign_builder_merge_policy_exemption_maps(*maps):
+    """Merge returned exemption keys without duplicating PolicyViolationKey values."""
+    merged = {}
+    for mapping in maps:
+        for op_index, rows in (mapping or {}).items():
+            bucket = merged.setdefault(str(op_index), [])
+            for row in rows or []:
+                normalized = {
+                    "policy_name": str((row or {}).get("policy_name", "") or "").strip(),
+                    "violating_text": str((row or {}).get("violating_text", "") or "").strip(),
+                }
+                if normalized["policy_name"] and normalized not in bucket:
+                    bucket.append(normalized)
+    return merged
+
+
+def campaign_builder_policy_error_rows(error, payload=None):
+    """Turn Google Ads policy failures into human-readable keyword rows."""
+    return campaign_builder_extract_policy_exemptions(error, payload).get("rows", [])
+
+
+def campaign_builder_format_google_ads_error(error, payload=None):
     if not isinstance(error, GoogleAdsException):
         return str(error)
 
+    manifest = campaign_builder_operation_manifest(payload or {}) if payload else []
     lines = [f"Request ID: {error.request_id}"]
 
-    for item in error.failure.errors:
+    all_errors = list(error.failure.errors)
+    has_shared_budget_root = any(
+        "incompatible with shared budget" in str(getattr(item, "message", "")).casefold()
+        for item in all_errors
+    )
+
+    for item in all_errors:
+        if has_shared_budget_root and (
+            "resource was not found" in str(getattr(item, "message", "")).casefold()
+        ):
+            continue
         message = getattr(item, "message", "Google Ads API error")
         field_names = []
+        op_index = campaign_builder_error_operation_index(item)
 
         if getattr(item, "location", None):
             for element in item.location.field_path_elements:
                 name = getattr(element, "field_name", "")
                 if name:
+                    if name == "mutate_operations":
+                        try:
+                            name = f"{name}[{int(element.index)}]"
+                        except Exception:
+                            pass
                     field_names.append(name)
 
+        suffix = ""
+        if op_index is not None and 0 <= op_index < len(manifest):
+            meta = manifest[op_index]
+            if meta.get("kind") == "keyword":
+                suffix = (
+                    f" | Ad Group: {meta.get('ad_group', '—')}"
+                    f" | Keyword: {meta.get('keyword', '—')}"
+                    f" | Type: {meta.get('label', 'Keyword')}"
+                )
+
         if field_names:
-            lines.append(f"{message} (Field: {' > '.join(field_names)})")
+            lines.append(f"{message} (Field: {' > '.join(field_names)}){suffix}")
         else:
-            lines.append(message)
+            lines.append(f"{message}{suffix}")
 
     return "\n".join(lines)
 
@@ -369,8 +867,33 @@ def campaign_builder_match_enum(client, match_type):
     return mapping[match_type]
 
 
+def campaign_builder_apply_policy_exemptions(client, operation, operation_index, payload):
+    """Attach approved PolicyViolationKey values to one keyword operation."""
+    mapping = payload.get("policy_exemptions_by_operation", {}) or {}
+    rows = mapping.get(str(operation_index), []) or mapping.get(operation_index, []) or []
+    if not rows:
+        return 0
+
+    criterion_operation = operation.ad_group_criterion_operation
+    keys = []
+    for row in rows:
+        policy_name = str((row or {}).get("policy_name", "") or "").strip()
+        violating_text = str((row or {}).get("violating_text", "") or "").strip()
+        if not policy_name:
+            continue
+        policy_key = client.get_type("PolicyViolationKey")
+        policy_key.policy_name = policy_name
+        if violating_text:
+            policy_key.violating_text = violating_text
+        keys.append(policy_key)
+
+    if keys:
+        criterion_operation.exempt_policy_violation_keys.extend(keys)
+    return len(keys)
+
+
 def campaign_builder_build_operations(client, customer_id, payload):
-    """Build one atomic Search campaign with budget, targeting, keywords and RSA."""
+    """Build one atomic Search campaign with one or more ad groups."""
     operations = []
 
     budget_service = client.get_service("CampaignBudgetService")
@@ -379,17 +902,24 @@ def campaign_builder_build_operations(client, customer_id, payload):
 
     budget_resource = budget_service.campaign_budget_path(customer_id, -1)
     campaign_resource = campaign_service.campaign_path(customer_id, -2)
-    ad_group_resource = ad_group_service.ad_group_path(customer_id, -3)
 
-    # 1. Campaign budget.
+    # 1. Campaign budget. New budgets default to shared=True unless explicitly
+    # disabled. Maximize Conversions on this builder uses a dedicated budget.
     mutate = client.get_type("MutateOperation")
     budget = mutate.campaign_budget_operation.create
     budget.resource_name = budget_resource
-    budget.name = (
-        f"{payload['campaign_name']} Budget {uuid4().hex[:8]}"
-    )
+    budget.name = f"{payload['campaign_name']} Budget {uuid4().hex[:8]}"
     budget.amount_micros = int(round(float(payload["daily_budget"]) * 1_000_000))
     budget.delivery_method = client.enums.BudgetDeliveryMethodEnum.STANDARD
+    # IMPORTANT: Google Ads defaults a new budget to shared=True when this
+    # field is omitted. Maximize Conversions in this builder must always use
+    # a dedicated non-shared daily budget.
+    budget.explicitly_shared = False
+    try:
+        budget.period = client.enums.BudgetPeriodEnum.DAILY
+    except Exception:
+        # DAILY is the API default on older client-library versions.
+        pass
     operations.append(mutate)
 
     # 2. Search campaign - always PAUSED at creation for safety.
@@ -397,9 +927,7 @@ def campaign_builder_build_operations(client, customer_id, payload):
     campaign = mutate.campaign_operation.create
     campaign.resource_name = campaign_resource
     campaign.name = campaign_builder_clip_text(payload["campaign_name"], 255)
-    campaign.advertising_channel_type = (
-        client.enums.AdvertisingChannelTypeEnum.SEARCH
-    )
+    campaign.advertising_channel_type = client.enums.AdvertisingChannelTypeEnum.SEARCH
     campaign.status = client.enums.CampaignStatusEnum.PAUSED
     campaign.campaign_budget = budget_resource
     campaign.network_settings.target_google_search = True
@@ -407,17 +935,13 @@ def campaign_builder_build_operations(client, customer_id, payload):
     campaign.network_settings.target_partner_search_network = False
     campaign.network_settings.target_content_network = False
     campaign.contains_eu_political_advertising = (
-        client.enums.EuPoliticalAdvertisingStatusEnum.
-        DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
+        client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
     )
 
     if payload["bidding_strategy"] == "Manual CPC":
         client.copy_from(campaign.manual_cpc, client.get_type("ManualCpc"))
     else:
-        client.copy_from(
-            campaign.maximize_conversions,
-            client.get_type("MaximizeConversions"),
-        )
+        client.copy_from(campaign.maximize_conversions, client.get_type("MaximizeConversions"))
 
     operations.append(mutate)
 
@@ -436,78 +960,167 @@ def campaign_builder_build_operations(client, customer_id, payload):
         criterion.language.language_constant = f"languageConstants/{language_id}"
         operations.append(mutate)
 
-    # 5. Campaign-level negative keywords.
-    for row in payload["negative_keywords"]:
-        mutate = client.get_type("MutateOperation")
-        criterion = mutate.campaign_criterion_operation.create
-        criterion.campaign = campaign_resource
-        criterion.negative = True
-        criterion.keyword.text = row["text"]
-        criterion.keyword.match_type = campaign_builder_match_enum(
-            client,
-            row["match_type"],
+    # Backward compatibility: accept the old single-ad-group payload too.
+    ad_groups = payload.get("ad_groups")
+    if not ad_groups:
+        ad_groups = [{
+            "service": payload.get("service", "Service"),
+            "ad_group_name": payload["ad_group_name"],
+            "keywords": payload["keywords"],
+            "negative_keywords": payload.get("negative_keywords", []),
+            "headlines": payload["headlines"],
+            "descriptions": payload["descriptions"],
+            "path1": payload.get("path1", ""),
+            "path2": payload.get("path2", ""),
+            "final_url": payload["final_url"],
+        }]
+
+    # 5+. Create each ad group and its own keyword set / negatives / RSA.
+    for index, group in enumerate(ad_groups):
+        # Negative temporary IDs are unique across the whole mutate request.
+        ad_group_temp_id = -100 - index
+        ad_group_resource = ad_group_service.ad_group_path(
+            customer_id,
+            ad_group_temp_id,
         )
+
+        mutate = client.get_type("MutateOperation")
+        ad_group = mutate.ad_group_operation.create
+        ad_group.resource_name = ad_group_resource
+        ad_group.name = campaign_builder_clip_text(group["ad_group_name"], 255)
+        ad_group.campaign = campaign_resource
+        ad_group.status = client.enums.AdGroupStatusEnum.ENABLED
+        ad_group.type_ = client.enums.AdGroupTypeEnum.SEARCH_STANDARD
+
+        if payload["bidding_strategy"] == "Manual CPC":
+            ad_group.cpc_bid_micros = int(
+                round(float(payload["manual_cpc_bid"]) * 1_000_000)
+            )
         operations.append(mutate)
 
-    # 6. Ad group.
-    mutate = client.get_type("MutateOperation")
-    ad_group = mutate.ad_group_operation.create
-    ad_group.resource_name = ad_group_resource
-    ad_group.name = campaign_builder_clip_text(payload["ad_group_name"], 255)
-    ad_group.campaign = campaign_resource
-    ad_group.status = client.enums.AdGroupStatusEnum.ENABLED
-    ad_group.type_ = client.enums.AdGroupTypeEnum.SEARCH_STANDARD
+        for row in group.get("keywords", []):
+            mutate = client.get_type("MutateOperation")
+            ag_criterion = mutate.ad_group_criterion_operation.create
+            ag_criterion.ad_group = ad_group_resource
+            ag_criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+            ag_criterion.keyword.text = row["text"]
+            ag_criterion.keyword.match_type = campaign_builder_match_enum(
+                client,
+                row["match_type"],
+            )
+            campaign_builder_apply_policy_exemptions(
+                client, mutate, len(operations), payload
+            )
+            operations.append(mutate)
 
-    if payload["bidding_strategy"] == "Manual CPC":
-        ad_group.cpc_bid_micros = int(
-            round(float(payload["manual_cpc_bid"]) * 1_000_000)
-        )
+        # Keep service-specific negatives at ad-group level so one service does
+        # not accidentally block another service in the same campaign.
+        for row in group.get("negative_keywords", []):
+            mutate = client.get_type("MutateOperation")
+            ag_criterion = mutate.ad_group_criterion_operation.create
+            ag_criterion.ad_group = ad_group_resource
+            ag_criterion.negative = True
+            ag_criterion.keyword.text = row["text"]
+            ag_criterion.keyword.match_type = campaign_builder_match_enum(
+                client,
+                row["match_type"],
+            )
+            campaign_builder_apply_policy_exemptions(
+                client, mutate, len(operations), payload
+            )
+            operations.append(mutate)
 
-    operations.append(mutate)
-
-    # 7. Positive keywords.
-    for row in payload["keywords"]:
         mutate = client.get_type("MutateOperation")
-        ad_group_criterion = mutate.ad_group_criterion_operation.create
-        ad_group_criterion.ad_group = ad_group_resource
-        ad_group_criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
-        ad_group_criterion.keyword.text = row["text"]
-        ad_group_criterion.keyword.match_type = campaign_builder_match_enum(
-            client,
-            row["match_type"],
-        )
+        ad_group_ad = mutate.ad_group_ad_operation.create
+        ad_group_ad.ad_group = ad_group_resource
+        ad_group_ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
+        ad_group_ad.ad.final_urls.append(group["final_url"])
+
+        rsa = ad_group_ad.ad.responsive_search_ad
+        headline_assets = []
+        for text in group.get("headlines", [])[:15]:
+            asset = client.get_type("AdTextAsset")
+            asset.text = text
+            headline_assets.append(asset)
+        rsa.headlines.extend(headline_assets)
+
+        description_assets = []
+        for text in group.get("descriptions", [])[:4]:
+            asset = client.get_type("AdTextAsset")
+            asset.text = text
+            description_assets.append(asset)
+        rsa.descriptions.extend(description_assets)
+
+        if group.get("path1"):
+            rsa.path1 = group["path1"]
+        if group.get("path2"):
+            rsa.path2 = group["path2"]
+
         operations.append(mutate)
-
-    # 8. Responsive Search Ad.
-    mutate = client.get_type("MutateOperation")
-    ad_group_ad = mutate.ad_group_ad_operation.create
-    ad_group_ad.ad_group = ad_group_resource
-    ad_group_ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
-    ad_group_ad.ad.final_urls.append(payload["final_url"])
-
-    rsa = ad_group_ad.ad.responsive_search_ad
-    headline_assets = []
-    for text in payload["headlines"][:15]:
-        asset = client.get_type("AdTextAsset")
-        asset.text = text
-        headline_assets.append(asset)
-    rsa.headlines.extend(headline_assets)
-
-    description_assets = []
-    for text in payload["descriptions"][:4]:
-        asset = client.get_type("AdTextAsset")
-        asset.text = text
-        description_assets.append(asset)
-    rsa.descriptions.extend(description_assets)
-
-    if payload.get("path1"):
-        rsa.path1 = payload["path1"]
-    if payload.get("path2"):
-        rsa.path2 = payload["path2"]
-
-    operations.append(mutate)
 
     return operations
+
+
+def campaign_builder_assert_operations(operations):
+    """Fail locally if the builder would send an unsafe/inconsistent request."""
+    if not operations:
+        raise ValueError("Campaign Builder produced no mutate operations.")
+
+    budget_create = operations[0].campaign_budget_operation.create
+    if bool(getattr(budget_create, "explicitly_shared", True)):
+        raise ValueError(
+            "Safety check failed: campaign budget is shared. "
+            "The builder requires explicitly_shared=False."
+        )
+
+    if len(operations) < 2:
+        raise ValueError("Campaign operation is missing from the mutate request.")
+
+    campaign_create = operations[1].campaign_operation.create
+    if str(getattr(campaign_create, "campaign_budget", "")) != str(
+        getattr(budget_create, "resource_name", "")
+    ):
+        raise ValueError(
+            "Safety check failed: campaign does not reference the temporary budget."
+        )
+
+
+def campaign_builder_request_audit(client, customer_id, payload):
+    """Build and locally verify the request without calling Google Ads."""
+    operations = campaign_builder_build_operations(client, customer_id, payload)
+    campaign_builder_assert_operations(operations)
+
+    budget = operations[0].campaign_budget_operation.create
+    campaign = operations[1].campaign_operation.create
+
+    ad_group_count = 0
+    keyword_count = 0
+    exemption_key_count = 0
+    for operation in operations:
+        try:
+            if str(operation.ad_group_operation.create.resource_name):
+                ad_group_count += 1
+        except Exception:
+            pass
+        try:
+            criterion_operation = operation.ad_group_criterion_operation
+            if str(criterion_operation.create.keyword.text):
+                keyword_count += 1
+            exemption_key_count += len(criterion_operation.exempt_policy_violation_keys)
+        except Exception:
+            pass
+
+    return {
+        "build": CAMPAIGN_BUILDER_BUILD,
+        "budget_resource": str(budget.resource_name),
+        "budget_explicitly_shared": bool(budget.explicitly_shared),
+        "budget_amount_micros": int(budget.amount_micros),
+        "campaign_budget_reference": str(campaign.campaign_budget),
+        "operations": len(operations),
+        "ad_groups": ad_group_count,
+        "ad_group_keywords_including_negatives": keyword_count,
+        "approved_policy_exemption_keys": exemption_key_count,
+    }
 
 
 def campaign_builder_mutate(
@@ -522,9 +1135,9 @@ def campaign_builder_mutate(
     request.customer_id = customer_id
     request.partial_failure = False
     request.validate_only = bool(validate_only)
-    request.mutate_operations.extend(
-        campaign_builder_build_operations(client, customer_id, payload)
-    )
+    operations = campaign_builder_build_operations(client, customer_id, payload)
+    campaign_builder_assert_operations(operations)
+    request.mutate_operations.extend(operations)
 
     return google_ads_service.mutate(request=request)
 
@@ -5489,15 +6102,16 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 "Daily performance data is not available."
             )    
         # ==================================================
-        # AI CAMPAIGN BUILDER
+        # AI CAMPAIGN BUILDER — MULTI AD GROUP
         # ==================================================
 
         st.divider()
         st.header("🚀 AI Campaign Builder")
         st.caption(
-            "AI Draft → Validate Only → Create as PAUSED. "
-            "The campaign cannot serve ads until you manually enable it in Google Ads."
+            "Multi-Ad-Group AI Draft → Validate Only → Create as PAUSED. "
+            "Nothing can serve until you manually enable the campaign in Google Ads."
         )
+        st.caption(f"Build: {CAMPAIGN_BUILDER_BUILD} • Dedicated budget: explicitly_shared=False")
 
         campaign_builder_services = [
             "Elderly Care",
@@ -5511,16 +6125,26 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         builder_col1, builder_col2 = st.columns(2)
 
         with builder_col1:
-            builder_service = st.selectbox(
-                "Service",
+            builder_services = st.multiselect(
+                "Services / Ad Groups",
                 campaign_builder_services,
-                key="campaign_builder_service",
+                default=["Elderly Care"],
+                key="campaign_builder_services_multi",
+                help="Each selected service becomes its own Search ad group.",
             )
+
+            default_campaign_label = (
+                " + ".join(builder_services[:2])
+                if builder_services
+                else "Home Care"
+            )
+            if len(builder_services) > 2:
+                default_campaign_label = "Home Care"
 
             builder_campaign_name = st.text_input(
                 "Campaign Name",
-                value=f"HK | {builder_service} | Hyderabad | Search",
-                key="campaign_builder_campaign_name",
+                value=f"HK | {default_campaign_label} | Hyderabad | Search",
+                key="campaign_builder_campaign_name_multi",
             )
 
             builder_daily_budget = st.number_input(
@@ -5529,13 +6153,13 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 max_value=100000.0,
                 value=1500.0,
                 step=100.0,
-                key="campaign_builder_daily_budget",
+                key="campaign_builder_daily_budget_multi",
             )
 
             builder_location = st.text_input(
                 "Target Location",
                 value="Hyderabad",
-                key="campaign_builder_location",
+                key="campaign_builder_location_multi",
             )
 
         with builder_col2:
@@ -5543,14 +6167,14 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 "Languages",
                 list(CAMPAIGN_BUILDER_LANGUAGE_IDS.keys()),
                 default=["English"],
-                key="campaign_builder_languages",
+                key="campaign_builder_languages_multi",
             )
 
             builder_bidding = st.selectbox(
                 "Bidding Strategy",
                 ["Maximize Conversions", "Manual CPC"],
                 index=0,
-                key="campaign_builder_bidding",
+                key="campaign_builder_bidding_multi",
             )
 
             if builder_bidding == "Manual CPC":
@@ -5560,565 +6184,1280 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                     max_value=10000.0,
                     value=50.0,
                     step=5.0,
-                    key="campaign_builder_manual_cpc",
+                    key="campaign_builder_manual_cpc_multi",
                 )
             else:
                 builder_manual_cpc = 0.0
 
-            builder_final_url = st.text_input(
-                "Final URL",
-                value="https://hareekrishna.com/",
-                key="campaign_builder_final_url",
-            )
+        # Separate landing page for every selected service / ad group.
+        # This avoids sending Elderly Care and Patient Care traffic to the same page.
+        campaign_builder_service_url_defaults = {
+            "Elderly Care": "https://hareekrishna.com/elderly-care",
+            "Patient Care": "https://hareekrishna.com/patient-care",
+            "Nursing Care": "https://hareekrishna.com/",
+            "Baby Care": "https://hareekrishna.com/baby-care",
+            "Caretaker": "https://hareekrishna.com/caretakers",
+            "Domestic Help / Maid": "https://hareekrishna.com/domestic-help",
+        }
+
+        builder_service_urls = {}
+        if builder_services:
+            st.markdown("**Final URLs by Ad Group**")
+            url_columns = st.columns(2)
+            for url_index, service_name in enumerate(builder_services):
+                url_key = (
+                    "campaign_builder_service_url_"
+                    + service_name.lower()
+                    .replace(" / ", "_")
+                    .replace(" ", "_")
+                    .replace("-", "_")
+                )
+                if url_key not in st.session_state:
+                    st.session_state[url_key] = campaign_builder_service_url_defaults.get(
+                        service_name,
+                        "https://hareekrishna.com/",
+                    )
+                with url_columns[url_index % 2]:
+                    builder_service_urls[service_name] = st.text_input(
+                        f"{service_name} Final URL",
+                        key=url_key,
+                        help=f"Landing page used only for the {service_name} ad group.",
+                    ).strip()
 
         st.info(
-            "Safety: AI generation only creates a draft. "
-            "Validate Only makes no Google Ads changes. "
-            "Actual creation always creates the campaign as PAUSED."
+            "Safety: AI only creates an editable draft. Validate Only makes no Google Ads changes. "
+            "Creation is atomic, partial failure is OFF, and the campaign is created as PAUSED."
         )
 
+        builder_input_errors = []
+        if not builder_services:
+            builder_input_errors.append("Select at least one Service / Ad Group.")
+        if not builder_campaign_name.strip():
+            builder_input_errors.append("Campaign Name is required.")
+        if not builder_location.strip():
+            builder_input_errors.append("Target Location is required.")
+        if not builder_languages:
+            builder_input_errors.append("Select at least one language.")
+        for service_name in builder_services:
+            service_url = builder_service_urls.get(service_name, "").strip()
+            if not campaign_builder_valid_url(service_url):
+                builder_input_errors.append(
+                    f"Enter a valid Final URL for {service_name} starting with http:// or https://."
+                )
+
+        for builder_error in builder_input_errors:
+            st.error(builder_error)
+
         generate_builder_draft = st.button(
-            "✨ Generate AI Campaign Draft",
-            key="generate_ai_campaign_builder_draft",
+            "✨ Generate Multi-Ad-Group AI Draft",
+            key="generate_ai_campaign_builder_multi_draft",
+            disabled=bool(builder_input_errors),
             width="stretch",
         )
 
         if generate_builder_draft:
-            builder_input_errors = []
-
-            if not builder_campaign_name.strip():
-                builder_input_errors.append("Campaign Name is required.")
-
-            if not builder_location.strip():
-                builder_input_errors.append("Target Location is required.")
-
-            if not builder_languages:
-                builder_input_errors.append("Select at least one language.")
-
-            if not campaign_builder_valid_url(builder_final_url):
-                builder_input_errors.append(
-                    "Enter a valid Final URL starting with http:// or https://."
-                )
-
-            if builder_input_errors:
-                for builder_error in builder_input_errors:
-                    st.error(builder_error)
-            else:
-                builder_ai_prompt = f"""
+            builder_ai_prompt = f"""
 You are a Google Ads Search campaign builder for a home-care services business.
 
 Return ONLY one valid JSON object. Do not use markdown fences.
 
 CAMPAIGN GOAL:
 - Generate qualified phone-call and lead intent.
-- Service: {builder_service}
+- Selected services: {', '.join(builder_services)}
 - Location: {builder_location}
 - Languages: {', '.join(builder_languages)}
-- Final URL: {builder_final_url}
-
-BUSINESS SERVICES:
-- Home Care
-- Elderly Care
-- Patient Care
-- Nursing Care
-- Baby Care / Babysitter / Nanny
-- Caretaker / Caregiver
-- Domestic Help / Maid / Housekeeping / Cook
+- Service Final URLs:
+{chr(10).join(f"  - {svc}: {builder_service_urls.get(svc, '')}" for svc in builder_services)}
 
 OWN BRAND - NEVER SUGGEST AS A NEGATIVE:
 - Hare Krishna
 - Harekrishna
 - Harekrishna Home Care Services
+- Shiva Kaartikeya
+- Shivakaartikeya
 
-REQUIREMENTS:
-- One tightly themed Search ad group for the selected service.
-- 12 to 20 high-intent keywords.
-- Prefer PHRASE and EXACT match. Use BROAD only when clearly justified.
-- Do not add unrelated or informational keywords.
-- Negative keywords must be only clearly irrelevant intent such as jobs,
-  vacancies, salary, course, training, free, PDF, meaning, definition, etc.
-- Do not make any offered service or own brand a negative keyword.
+REQUIREMENTS FOR EACH SELECTED SERVICE:
+- Create exactly one tightly themed Search ad group.
+- 12 to 20 high-intent positive keywords.
+- Prefer PHRASE and EXACT. Use BROAD only when clearly justified.
+- Do not use informational, job, course, salary, PDF, meaning or definition intent as positive keywords.
+- Negative keywords must be clearly irrelevant only.
+- Never make an offered service, own brand, or a generic home-care term negative just because it overlaps another ad group.
 - Create 10 to 15 unique RSA headlines, each <= 30 characters.
 - Create 3 to 4 unique RSA descriptions, each <= 90 characters.
-- Avoid unverifiable claims such as #1, guaranteed, cheapest, best in India.
-- Use practical call/lead intent without promising unavailable staff.
-- path1 and path2 must be lowercase URL path words, <= 15 characters each.
+- Avoid unverifiable claims (#1, guaranteed, cheapest, best in India).
+- Use practical call/lead intent.
+- path1 and path2: lowercase URL path words, <= 15 characters each.
 
 JSON SCHEMA:
 {{
-  "ad_group_name": "string",
-  "keywords": [
-    {{"text": "keyword", "match_type": "PHRASE"}}
-  ],
-  "negative_keywords": [
-    {{"text": "negative", "match_type": "PHRASE"}}
-  ],
-  "headlines": ["headline"],
-  "descriptions": ["description"],
-  "path1": "string",
-  "path2": "string"
+  "ad_groups": [
+    {{
+      "service": "one selected service exactly",
+      "ad_group_name": "string",
+      "keywords": [{{"text": "keyword", "match_type": "PHRASE"}}],
+      "negative_keywords": [{{"text": "negative", "match_type": "PHRASE"}}],
+      "headlines": ["headline"],
+      "descriptions": ["description"],
+      "path1": "string",
+      "path2": "string"
+    }}
+  ]
 }}
 """
 
-                builder_ai_cache_key = campaign_builder_fingerprint(
+            builder_ai_cache_key = campaign_builder_fingerprint(
+                {
+                    "services": sorted(builder_services),
+                    "location": builder_location,
+                    "languages": sorted(builder_languages),
+                    "service_urls": {
+                        service_name: builder_service_urls.get(service_name, "")
+                        for service_name in builder_services
+                    },
+                }
+            )
+
+            try:
+                if (
+                    st.session_state.get("campaign_builder_multi_ai_cache_key")
+                    == builder_ai_cache_key
+                    and st.session_state.get("campaign_builder_multi_ai_cache_draft")
+                ):
+                    raw_multi = st.session_state[
+                        "campaign_builder_multi_ai_cache_draft"
+                    ]
+                    st.success(
+                        "Saved AI draft reused for the same setup. No new OpenAI call was used."
+                    )
+                else:
+                    with st.spinner("AI is building separate ad groups..."):
+                        builder_ai_response = openai_client.responses.create(
+                            model="gpt-5.4-mini",
+                            input=builder_ai_prompt,
+                            max_output_tokens=5200,
+                        )
+                    raw_multi = campaign_builder_extract_json(
+                        builder_ai_response.output_text
+                    )
+                    st.session_state[
+                        "campaign_builder_multi_ai_cache_key"
+                    ] = builder_ai_cache_key
+                    st.session_state[
+                        "campaign_builder_multi_ai_cache_draft"
+                    ] = raw_multi
+
+                raw_groups = raw_multi.get("ad_groups", []) if isinstance(raw_multi, dict) else []
+                groups_by_service = {}
+                for raw_group in raw_groups:
+                    if not isinstance(raw_group, dict):
+                        continue
+                    raw_service = str(raw_group.get("service", "")).strip()
+                    matched_service = next(
+                        (
+                            svc for svc in builder_services
+                            if svc.casefold() == raw_service.casefold()
+                        ),
+                        None,
+                    )
+                    if matched_service and matched_service not in groups_by_service:
+                        groups_by_service[matched_service] = raw_group
+
+                clean_groups = []
+                for svc in builder_services:
+                    clean = campaign_builder_sanitize_draft(
+                        groups_by_service.get(svc, {}),
+                        svc,
+                        builder_location,
+                    )
+                    clean["service"] = svc
+                    clean["final_url"] = builder_service_urls.get(
+                        svc,
+                        "https://hareekrishna.com/",
+                    ).strip()
+                    clean_groups.append(clean)
+
+                st.session_state["campaign_builder_multi_draft"] = clean_groups
+                st.session_state.pop("campaign_builder_validated_fingerprint", None)
+                st.session_state.pop("campaign_builder_validated_location", None)
+
+                # Remove stale per-group edit widgets from prior drafts.
+                for key in list(st.session_state.keys()):
+                    if str(key).startswith("cb_multi_edit_"):
+                        st.session_state.pop(key, None)
+
+                st.rerun()
+
+            except Exception as builder_ai_error:
+                st.error(
+                    "AI campaign draft could not be generated. "
+                    f"Technical detail: {builder_ai_error}"
+                )
+
+        builder_groups_draft = st.session_state.get("campaign_builder_multi_draft")
+
+        if builder_groups_draft:
+            # If selected services changed, require a new AI draft rather than silently
+            # reusing groups for the previous selection.
+            draft_services = [str(g.get("service", "")) for g in builder_groups_draft]
+            if draft_services != list(builder_services):
+                st.warning(
+                    "Services changed after AI generation. Click Generate Multi-Ad-Group AI Draft again."
+                )
+            else:
+                st.subheader("📝 Review & Edit Ad Groups")
+                edited_groups = []
+                group_tabs = st.tabs([g["service"] for g in builder_groups_draft])
+
+                for group_index, (tab, group_draft) in enumerate(
+                    zip(group_tabs, builder_groups_draft)
+                ):
+                    service_name = group_draft["service"]
+                    prefix = f"cb_multi_edit_{group_index}_"
+
+                    with tab:
+                        ad_group_name = st.text_input(
+                            "Ad Group Name",
+                            value=group_draft["ad_group_name"],
+                            key=prefix + "name",
+                        )
+
+                        final_url = st.text_input(
+                            "Final URL for this Ad Group",
+                            value=(
+                                group_draft.get("final_url")
+                                or builder_service_urls.get(
+                                    service_name,
+                                    "https://hareekrishna.com/",
+                                )
+                            ),
+                            key=prefix + "url",
+                        )
+
+                        edit_col1, edit_col2 = st.columns(2)
+                        with edit_col1:
+                            keyword_text = st.text_area(
+                                "Positive Keywords — keyword | MATCH_TYPE",
+                                value=campaign_builder_keyword_lines(group_draft["keywords"]),
+                                height=300,
+                                key=prefix + "keywords",
+                            )
+                            negative_text = st.text_area(
+                                "Negative Keywords — keyword | MATCH_TYPE",
+                                value=campaign_builder_keyword_lines(
+                                    group_draft.get("negative_keywords", [])
+                                ),
+                                height=220,
+                                key=prefix + "negatives",
+                            )
+
+                        with edit_col2:
+                            headlines_text = st.text_area(
+                                "RSA Headlines — one per line (max 30 chars)",
+                                value="\n".join(group_draft["headlines"]),
+                                height=300,
+                                key=prefix + "headlines",
+                            )
+                            descriptions_text = st.text_area(
+                                "RSA Descriptions — one per line (max 90 chars)",
+                                value="\n".join(group_draft["descriptions"]),
+                                height=220,
+                                key=prefix + "descriptions",
+                            )
+
+                        path_col1, path_col2 = st.columns(2)
+                        with path_col1:
+                            path1 = st.text_input(
+                                "Display Path 1",
+                                value=group_draft.get("path1", ""),
+                                key=prefix + "path1",
+                            )
+                        with path_col2:
+                            path2 = st.text_input(
+                                "Display Path 2",
+                                value=group_draft.get("path2", ""),
+                                key=prefix + "path2",
+                            )
+
+                        clean_group = campaign_builder_sanitize_draft(
+                            {
+                                "ad_group_name": ad_group_name,
+                                "keywords": campaign_builder_parse_keyword_lines(
+                                    keyword_text,
+                                    negative=False,
+                                ),
+                                "negative_keywords": campaign_builder_parse_keyword_lines(
+                                    negative_text,
+                                    negative=True,
+                                ),
+                                "headlines": [
+                                    line.strip()
+                                    for line in headlines_text.splitlines()
+                                    if line.strip()
+                                ],
+                                "descriptions": [
+                                    line.strip()
+                                    for line in descriptions_text.splitlines()
+                                    if line.strip()
+                                ],
+                                "path1": path1,
+                                "path2": path2,
+                            },
+                            service_name,
+                            builder_location,
+                        )
+                        clean_group["service"] = service_name
+                        clean_group["final_url"] = final_url.strip()
+                        edited_groups.append(clean_group)
+
+                # ==================================================
+                # KEYWORD INTELLIGENCE + MANUAL APPROVAL CENTER
+                # ==================================================
+
+                st.subheader("🎯 Keyword Intelligence & Approval Center")
+                st.caption(
+                    "Actual conversions/CPA get first priority, then CTR/CPC and relevance; Planner demand is decision support for new keywords. "
+                    "Every keyword gets a 0-100 Score, ADD/TEST/REVIEW/AVOID action, reason, and overlap warning. Nothing is added/removed without your approval."
+                )
+
+                proposed_keyword_rows = []
+                for group_index, group_row in enumerate(edited_groups):
+                    for keyword_index, keyword_row in enumerate(group_row.get("keywords", [])):
+                        proposed_keyword_rows.append(
+                            {
+                                "Group Index": group_index,
+                                "Keyword Index": keyword_index,
+                                "Service": group_row.get("service", "Service"),
+                                "Ad Group": group_row.get("ad_group_name", "Ad Group"),
+                                "Keyword": keyword_row.get("text", ""),
+                                "Match Type": keyword_row.get("match_type", "PHRASE"),
+                                "Keyword Key": campaign_builder_keyword_key(keyword_row.get("text", "")),
+                            }
+                        )
+
+                proposed_keyword_df = pd.DataFrame(proposed_keyword_rows)
+                keyword_center_source_key = campaign_builder_fingerprint(
                     {
-                        "service": builder_service,
+                        "groups": [
+                            {
+                                "service": g.get("service"),
+                                "ad_group_name": g.get("ad_group_name"),
+                                "keywords": g.get("keywords", []),
+                            }
+                            for g in edited_groups
+                        ],
                         "location": builder_location,
-                        "languages": builder_languages,
-                        "final_url": builder_final_url,
+                        "languages": sorted(builder_languages),
                     }
                 )
 
-                try:
-                    if (
-                        st.session_state.get("campaign_builder_ai_cache_key")
-                        == builder_ai_cache_key
-                        and st.session_state.get("campaign_builder_ai_cache_draft")
-                    ):
-                        builder_draft = st.session_state[
-                            "campaign_builder_ai_cache_draft"
-                        ]
-                        st.success(
-                            "Saved AI draft reused for the same setup. "
-                            "No new OpenAI call was used."
+                account_kw_benchmark_ctr = 0.0
+                account_kw_benchmark_cpc = 0.0
+                account_kw_benchmark_cpa = 0.0
+                history_lookup = {}
+
+                if isinstance(keyword_summary_df, pd.DataFrame) and not keyword_summary_df.empty:
+                    history_source = keyword_summary_df.copy()
+                    if "Keyword Key" not in history_source.columns:
+                        history_source["Keyword Key"] = history_source["Keyword"].apply(
+                            campaign_builder_keyword_key
                         )
                     else:
-                        with st.spinner("AI is building the campaign draft..."):
-                            builder_ai_response = openai_client.responses.create(
-                                model="gpt-5.4-mini",
-                                input=builder_ai_prompt,
-                                max_output_tokens=2200,
+                        history_source["Keyword Key"] = history_source["Keyword Key"].apply(
+                            campaign_builder_keyword_key
+                        )
+
+                    history_lookup = {
+                        str(row["Keyword Key"]): row.to_dict()
+                        for _, row in history_source.drop_duplicates(
+                            subset=["Keyword Key"], keep="first"
+                        ).iterrows()
+                    }
+
+                    ctr_values = pd.to_numeric(
+                        history_source.loc[history_source["Impressions"] > 0, "CTR %"],
+                        errors="coerce",
+                    ).replace([float("inf"), float("-inf")], pd.NA).dropna()
+                    cpc_values = pd.to_numeric(
+                        history_source.loc[history_source["Clicks"] > 0, "Avg CPC (₹)"],
+                        errors="coerce",
+                    ).replace(0, pd.NA).dropna()
+                    cpa_values = pd.to_numeric(
+                        history_source.loc[history_source["Conversions"] > 0, "CPA (₹)"],
+                        errors="coerce",
+                    ).replace(0, pd.NA).dropna()
+
+                    account_kw_benchmark_ctr = float(ctr_values.median()) if not ctr_values.empty else 0.0
+                    account_kw_benchmark_cpc = float(cpc_values.median()) if not cpc_values.empty else 0.0
+                    account_kw_benchmark_cpa = float(cpa_values.median()) if not cpa_values.empty else 0.0
+                    if overall_cpa > 0:
+                        account_kw_benchmark_cpa = float(overall_cpa)
+
+                benchmark_cols = st.columns(3)
+                benchmark_cols[0].metric(
+                    "Keyword CTR Benchmark",
+                    f"{account_kw_benchmark_ctr:.2f}%" if account_kw_benchmark_ctr > 0 else "Need data",
+                )
+                benchmark_cols[1].metric(
+                    "Keyword CPC Benchmark",
+                    f"₹{account_kw_benchmark_cpc:,.2f}" if account_kw_benchmark_cpc > 0 else "Need data",
+                )
+                benchmark_cols[2].metric(
+                    "CPA Benchmark",
+                    f"₹{account_kw_benchmark_cpa:,.2f}" if account_kw_benchmark_cpa > 0 else "Need data",
+                )
+
+                planner_keywords = (
+                    proposed_keyword_df["Keyword"].astype(str).tolist()
+                    if not proposed_keyword_df.empty
+                    else []
+                )
+                planner_language_name = builder_languages[0] if builder_languages else "English"
+                planner_language_id = CAMPAIGN_BUILDER_LANGUAGE_IDS.get(planner_language_name, "1000")
+                builder_planner_request_key = campaign_builder_fingerprint(
+                    {
+                        "keywords": sorted(campaign_builder_keyword_key(v) for v in planner_keywords),
+                        "location": builder_location.strip().casefold(),
+                        "language": planner_language_id,
+                    }
+                )
+
+                planner_button_col, planner_note_col = st.columns([1, 2])
+                with planner_button_col:
+                    load_builder_planner = st.button(
+                        "🔎 Load Planner Metrics for Draft Keywords",
+                        key="campaign_builder_load_draft_keyword_planner",
+                        disabled=not bool(planner_keywords),
+                        width="stretch",
+                    )
+                with planner_note_col:
+                    st.caption(
+                        f"Manual Google Keyword Planner check • Location: {builder_location} • Language: {planner_language_name}. "
+                        "Cached for this exact draft."
+                    )
+
+                if load_builder_planner:
+                    try:
+                        with st.spinner("Loading Keyword Planner historical metrics for the draft keywords..."):
+                            builder_geo_resource, builder_geo_name = growth_resolve_geo_target(
+                                client,
+                                location_name=builder_location,
+                                country_code="IN",
+                            )
+                            builder_planner_df, _ = growth_fetch_keyword_historical_metrics(
+                                client=client,
+                                customer_id=customer_id,
+                                keywords=planner_keywords,
+                                geo_resource_name=builder_geo_resource,
+                                language_id=planner_language_id,
+                            )
+                        st.session_state["campaign_builder_keyword_planner_key"] = builder_planner_request_key
+                        st.session_state["campaign_builder_keyword_planner_df"] = builder_planner_df
+                        st.session_state["campaign_builder_keyword_planner_geo"] = builder_geo_name
+                        st.success("Keyword Planner metrics loaded for this draft.")
+                    except Exception as builder_planner_error:
+                        st.error("Keyword Planner metrics could not be loaded. The draft itself was not changed.")
+                        st.caption(f"Technical detail: {builder_planner_error}")
+
+                builder_planner_is_current = (
+                    st.session_state.get("campaign_builder_keyword_planner_key") == builder_planner_request_key
+                    and isinstance(st.session_state.get("campaign_builder_keyword_planner_df"), pd.DataFrame)
+                )
+                builder_planner_df = (
+                    st.session_state.get("campaign_builder_keyword_planner_df", pd.DataFrame()).copy()
+                    if builder_planner_is_current
+                    else pd.DataFrame()
+                )
+
+                planner_lookup = {}
+                if not builder_planner_df.empty and "Keyword Key" in builder_planner_df.columns:
+                    builder_planner_df["Keyword Key"] = builder_planner_df["Keyword Key"].apply(
+                        campaign_builder_keyword_key
+                    )
+                    planner_lookup = {
+                        str(row["Keyword Key"]): row.to_dict()
+                        for _, row in builder_planner_df.drop_duplicates(
+                            subset=["Keyword Key"], keep="first"
+                        ).iterrows()
+                    }
+
+                keyword_overlap_lookup = campaign_builder_keyword_overlap_map(proposed_keyword_rows)
+
+                intelligence_rows = []
+                for row in proposed_keyword_rows:
+                    keyword_key = row["Keyword Key"]
+                    history = history_lookup.get(keyword_key, {})
+                    planner = planner_lookup.get(keyword_key, {})
+
+                    impressions = float(history.get("Impressions", 0) or 0)
+                    clicks = float(history.get("Clicks", 0) or 0)
+                    cost = float(history.get("Cost (₹)", 0) or 0)
+                    conversions = float(history.get("Conversions", 0) or 0)
+                    ctr = float(history.get("CTR %", 0) or 0)
+                    cpc = float(history.get("Avg CPC (₹)", 0) or 0)
+                    cpa = float(history.get("CPA (₹)", 0) or 0)
+                    has_history = impressions > 0 or clicks > 0 or cost > 0 or conversions > 0
+
+                    planner_searches = planner.get("Avg Monthly Searches") if planner else None
+                    planner_comp_index = planner.get("Competition Index") if planner else None
+                    planner_bid_low = planner.get("Top Page Bid Low (₹)") if planner else None
+                    planner_bid_high = planner.get("Top Page Bid High (₹)") if planner else None
+
+                    score, action, reason = campaign_builder_keyword_recommendation(
+                        keyword=row["Keyword"],
+                        service=row["Service"],
+                        impressions=impressions,
+                        clicks=clicks,
+                        cost=cost,
+                        conversions=conversions,
+                        ctr=ctr,
+                        cpc=cpc,
+                        cpa=cpa,
+                        benchmark_ctr=account_kw_benchmark_ctr,
+                        benchmark_cpc=account_kw_benchmark_cpc,
+                        benchmark_cpa=account_kw_benchmark_cpa,
+                        planner_searches=planner_searches,
+                        planner_competition_index=planner_comp_index,
+                        planner_bid_low=planner_bid_low,
+                        planner_bid_high=planner_bid_high,
+                    )
+
+                    ctr_signal = "New"
+                    if has_history and account_kw_benchmark_ctr > 0:
+                        ctr_signal = "🟢 Above" if ctr >= account_kw_benchmark_ctr else "🟡 Below"
+                    cpc_signal = "New"
+                    if has_history and cpc > 0 and account_kw_benchmark_cpc > 0:
+                        cpc_signal = "🟢 Lower" if cpc <= account_kw_benchmark_cpc else "🟡 Higher"
+
+                    intelligence_rows.append(
+                        {
+                            "Add": not action.startswith("🔴"),
+                            "Service": row["Service"],
+                            "Ad Group": row["Ad Group"],
+                            "Keyword": row["Keyword"],
+                            "Match Type": row["Match Type"],
+                            "Impressions": int(impressions),
+                            "Clicks": int(clicks),
+                            "CTR %": round(ctr, 2) if has_history else None,
+                            "CTR Signal": ctr_signal,
+                            "Avg CPC (₹)": round(cpc, 2) if has_history and cpc > 0 else None,
+                            "CPC Signal": cpc_signal,
+                            "Cost (₹)": round(cost, 2) if has_history else None,
+                            "Conversions": round(conversions, 2) if has_history else None,
+                            "CPA (₹)": round(cpa, 2) if has_history and conversions > 0 else None,
+                            "Planner Searches": int(planner_searches or 0) if planner_searches is not None else None,
+                            "Competition": planner.get("Competition") if planner else None,
+                            "Competition Index": int(planner_comp_index or 0) if planner_comp_index is not None else None,
+                            "Planner Bid Low (₹)": round(float(planner_bid_low or 0), 2) if planner_bid_low is not None else None,
+                            "Planner Bid High (₹)": round(float(planner_bid_high or 0), 2) if planner_bid_high is not None else None,
+                            "Score": score,
+                            "Recommended Action": action,
+                            "Reason": reason,
+                            "Overlap": keyword_overlap_lookup.get(keyword_key, ("—", ""))[0],
+                            "Overlap Note": keyword_overlap_lookup.get(keyword_key, ("—", ""))[1],
+                            "Data Source": (
+                                "Actual + Planner" if has_history and planner else
+                                "Actual Google Ads" if has_history else
+                                "New + Planner" if planner else
+                                "New / No History"
+                            ),
+                        }
+                    )
+
+                keyword_intelligence_df = pd.DataFrame(intelligence_rows)
+                approved_groups = []
+
+                if keyword_intelligence_df.empty:
+                    st.warning("No positive keywords are available for approval.")
+                    approved_groups = edited_groups
+                else:
+                    editor_disabled_columns = [
+                        col for col in keyword_intelligence_df.columns if col != "Add"
+                    ]
+                    planner_key_suffix = builder_planner_request_key[:8] if builder_planner_is_current else "noplan"
+                    group_tabs = st.tabs([g.get("service", f"Ad Group {i+1}") for i, g in enumerate(edited_groups)])
+
+                    approved_by_service = {}
+                    selected_intelligence_rows = []
+                    for tab, group_row in zip(group_tabs, edited_groups):
+                        service_name = group_row.get("service", "Service")
+                        with tab:
+                            group_kw_df = keyword_intelligence_df[
+                                keyword_intelligence_df["Service"] == service_name
+                            ].copy()
+                            st.caption(
+                                "Tick/untick only the **Add** column. All metrics are read-only decision support."
+                            )
+                            edited_kw_df = st.data_editor(
+                                group_kw_df,
+                                hide_index=True,
+                                disabled=editor_disabled_columns,
+                                num_rows="fixed",
+                                width="stretch",
+                                key=(
+                                    "campaign_builder_kw_approval_"
+                                    + re.sub(r"[^a-z0-9]+", "_", service_name.casefold()).strip("_")
+                                    + "_"
+                                    + keyword_center_source_key[:10]
+                                    + "_"
+                                    + planner_key_suffix
+                                ),
                             )
 
-                        raw_builder_draft = campaign_builder_extract_json(
-                            builder_ai_response.output_text
+                            approved_keyword_rows = []
+                            if isinstance(edited_kw_df, pd.DataFrame) and "Add" in edited_kw_df.columns:
+                                selected_rows = edited_kw_df[edited_kw_df["Add"] == True]
+                                selected_intelligence_rows.extend(selected_rows.to_dict("records"))
+                                approved_keyword_rows = [
+                                    {
+                                        "text": str(item["Keyword"]).strip(),
+                                        "match_type": campaign_builder_normalize_match_type(item["Match Type"]),
+                                    }
+                                    for _, item in selected_rows.iterrows()
+                                    if str(item["Keyword"]).strip()
+                                ]
+                            approved_by_service[service_name] = approved_keyword_rows
+
+                    for group_row in edited_groups:
+                        service_name = group_row.get("service", "Service")
+                        approved_group = dict(group_row)
+                        approved_group["keywords"] = campaign_builder_clean_keyword_rows(
+                            approved_by_service.get(service_name, []),
+                            max_items=20,
+                            negative=False,
                         )
-                        builder_draft = campaign_builder_sanitize_draft(
-                            raw_builder_draft,
-                            builder_service,
-                            builder_location,
+                        approved_groups.append(approved_group)
+
+                    total_proposed_keywords = len(keyword_intelligence_df)
+                    total_approved_keywords = sum(len(g.get("keywords", [])) for g in approved_groups)
+                    approval_metrics = st.columns(4)
+                    approval_metrics[0].metric("Proposed Keywords", total_proposed_keywords)
+                    approval_metrics[1].metric("Selected", total_approved_keywords)
+                    approval_metrics[2].metric(
+                        "ADD / TEST",
+                        int(keyword_intelligence_df["Recommended Action"].isin(["🟢 ADD", "🟡 TEST"]).sum()),
+                    )
+                    approval_metrics[3].metric(
+                        "REVIEW / AVOID",
+                        int(keyword_intelligence_df["Recommended Action"].isin(["🟠 REVIEW", "🔴 AVOID"]).sum()),
+                    )
+
+                    selected_intelligence_df = pd.DataFrame(selected_intelligence_rows)
+                    selected_review_count = 0
+                    selected_avoid_count = 0
+                    selected_add_test_count = 0
+                    if not selected_intelligence_df.empty and "Recommended Action" in selected_intelligence_df.columns:
+                        selected_review_count = int((selected_intelligence_df["Recommended Action"] == "🟠 REVIEW").sum())
+                        selected_avoid_count = int((selected_intelligence_df["Recommended Action"] == "🔴 AVOID").sum())
+                        selected_add_test_count = int(selected_intelligence_df["Recommended Action"].isin(["🟢 ADD", "🟡 TEST"]).sum())
+
+                    st.markdown("#### ✅ Keyword Create Safety")
+                    safety_cols = st.columns(4)
+                    safety_cols[0].metric("Selected", total_approved_keywords)
+                    safety_cols[1].metric("Selected ADD/TEST", selected_add_test_count)
+                    safety_cols[2].metric("Selected REVIEW", selected_review_count)
+                    safety_cols[3].metric("Selected AVOID", selected_avoid_count)
+                    if selected_avoid_count > 0:
+                        st.error("Selected keywords still include 🔴 AVOID items. Untick them unless you have a specific manual reason to test them.")
+                    elif selected_review_count > 0:
+                        st.warning("Selected keywords include 🟠 REVIEW items. Check Reason + actual history before validation.")
+                    else:
+                        st.success("Keyword selection is clean: no selected 🔴 AVOID or 🟠 REVIEW keywords.")
+                    st.caption("Duplicate/overlap flags are review signals only; similar keywords are never removed automatically.")
+
+                # Optional actual search-term opportunities. These are suggestions only;
+                # they are never auto-added to a draft because routing to the correct service matters.
+                with st.expander("🔍 Search-Term Keyword Opportunities — Actual Data", expanded=False):
+                    if isinstance(search_df, pd.DataFrame) and not search_df.empty:
+                        opportunity_df = (
+                            search_df.groupby("Search Term", as_index=False)
+                            .agg(
+                                {
+                                    "Impressions": "sum",
+                                    "Clicks": "sum",
+                                    "Cost (₹)": "sum",
+                                    "Conversions": "sum",
+                                }
+                            )
                         )
+                        opportunity_df["CTR %"] = opportunity_df.apply(
+                            lambda r: (r["Clicks"] / r["Impressions"] * 100) if r["Impressions"] > 0 else 0,
+                            axis=1,
+                        )
+                        opportunity_df["Avg CPC (₹)"] = opportunity_df.apply(
+                            lambda r: (r["Cost (₹)"] / r["Clicks"]) if r["Clicks"] > 0 else 0,
+                            axis=1,
+                        )
+                        opportunity_df["CPA (₹)"] = opportunity_df.apply(
+                            lambda r: (r["Cost (₹)"] / r["Conversions"]) if r["Conversions"] > 0 else 0,
+                            axis=1,
+                        )
+                        existing_draft_keys = set(proposed_keyword_df["Keyword Key"].tolist()) if not proposed_keyword_df.empty else set()
+                        opportunity_df["Keyword Key"] = opportunity_df["Search Term"].apply(campaign_builder_keyword_key)
+                        opportunity_df = opportunity_df[~opportunity_df["Keyword Key"].isin(existing_draft_keys)].copy()
 
-                        st.session_state[
-                            "campaign_builder_ai_cache_key"
-                        ] = builder_ai_cache_key
-                        st.session_state[
-                            "campaign_builder_ai_cache_draft"
-                        ] = builder_draft
+                        protected_own_brand = re.compile(r"\b(hare\s*krishna|harekrishna|shiva\s*kaartikeya|shivakaartikeya)\b", re.I)
+                        irrelevant_re = re.compile(
+                            r"\b(job|jobs|vacancy|vacancies|career|salary|course|courses|training|institute|certification|syllabus|exam|pdf|meaning|definition|resume|cv)\b",
+                            re.I,
+                        )
+                        opportunity_df = opportunity_df[
+                            ~opportunity_df["Search Term"].astype(str).str.contains(protected_own_brand, na=False)
+                        ]
+                        opportunity_df = opportunity_df[
+                            ~opportunity_df["Search Term"].astype(str).str.contains(irrelevant_re, na=False)
+                        ]
+                        opportunity_df = opportunity_df[
+                            (opportunity_df["Conversions"] > 0)
+                            | (
+                                (opportunity_df["Clicks"] >= 3)
+                                & (
+                                    (account_kw_benchmark_ctr <= 0)
+                                    | (opportunity_df["CTR %"] >= account_kw_benchmark_ctr)
+                                )
+                            )
+                        ].copy()
 
-                    st.session_state["campaign_builder_draft"] = builder_draft
-                    st.session_state.pop(
-                        "campaign_builder_validated_fingerprint",
-                        None,
-                    )
-                    st.session_state.pop(
-                        "campaign_builder_validated_location",
-                        None,
-                    )
+                        if opportunity_df.empty:
+                            st.info("No strong new search-term opportunity is available in the selected scope.")
+                        else:
+                            opportunity_df["Opportunity"] = opportunity_df.apply(
+                                lambda r: "🟢 Strong Add Candidate" if r["Conversions"] > 0 else "🟡 Review Candidate",
+                                axis=1,
+                            )
+                            opportunity_df = opportunity_df.sort_values(
+                                ["Conversions", "Clicks", "Cost (₹)"],
+                                ascending=[False, False, False],
+                            ).head(15)
+                            st.dataframe(
+                                opportunity_df[
+                                    [
+                                        "Search Term", "Impressions", "Clicks", "CTR %",
+                                        "Avg CPC (₹)", "Cost (₹)", "Conversions", "CPA (₹)", "Opportunity"
+                                    ]
+                                ],
+                                hide_index=True,
+                                width="stretch",
+                            )
+                            st.caption(
+                                "These are actual search terms, but they are REVIEW suggestions only. Add them manually to the correct service/ad group if relevant."
+                            )
+                    else:
+                        st.info("No Search Terms data is available for opportunity suggestions.")
 
-                    for edit_key in [
-                        "campaign_builder_ad_group_edit",
-                        "campaign_builder_keywords_edit",
-                        "campaign_builder_negatives_edit",
-                        "campaign_builder_headlines_edit",
-                        "campaign_builder_descriptions_edit",
-                        "campaign_builder_path1_edit",
-                        "campaign_builder_path2_edit",
-                    ]:
-                        st.session_state.pop(edit_key, None)
+                # Downstream preview, validation and PAUSED creation use only approved positive keywords.
+                edited_groups = approved_groups
 
-                    st.rerun()
-
-                except Exception as builder_ai_error:
-                    st.error(
-                        "AI campaign draft could not be generated. "
-                        f"Technical detail: {builder_ai_error}"
-                    )
-
-        builder_draft = st.session_state.get("campaign_builder_draft")
-
-        if builder_draft:
-            st.subheader("📝 Review & Edit AI Draft")
-
-            builder_ad_group_name = st.text_input(
-                "Ad Group Name",
-                value=builder_draft["ad_group_name"],
-                key="campaign_builder_ad_group_edit",
-            )
-
-            edit_col1, edit_col2 = st.columns(2)
-
-            with edit_col1:
-                builder_keyword_text = st.text_area(
-                    "Keywords — one per line: keyword | MATCH_TYPE",
-                    value=campaign_builder_keyword_lines(
-                        builder_draft["keywords"]
+                builder_core_payload = {
+                    "campaign_name": campaign_builder_clip_text(
+                        builder_campaign_name,
+                        255,
                     ),
-                    height=280,
-                    key="campaign_builder_keywords_edit",
-                )
-
-                builder_negative_text = st.text_area(
-                    "Negative Keywords — one per line: keyword | MATCH_TYPE",
-                    value=campaign_builder_keyword_lines(
-                        builder_draft["negative_keywords"]
-                    ),
-                    height=220,
-                    key="campaign_builder_negatives_edit",
-                )
-
-            with edit_col2:
-                builder_headlines_text = st.text_area(
-                    "RSA Headlines — one per line (max 30 chars)",
-                    value="\n".join(builder_draft["headlines"]),
-                    height=280,
-                    key="campaign_builder_headlines_edit",
-                )
-
-                builder_descriptions_text = st.text_area(
-                    "RSA Descriptions — one per line (max 90 chars)",
-                    value="\n".join(builder_draft["descriptions"]),
-                    height=220,
-                    key="campaign_builder_descriptions_edit",
-                )
-
-            path_col1, path_col2 = st.columns(2)
-
-            with path_col1:
-                builder_path1 = st.text_input(
-                    "Display Path 1",
-                    value=builder_draft.get("path1", ""),
-                    key="campaign_builder_path1_edit",
-                )
-
-            with path_col2:
-                builder_path2 = st.text_input(
-                    "Display Path 2",
-                    value=builder_draft.get("path2", ""),
-                    key="campaign_builder_path2_edit",
-                )
-
-            current_builder_draft = campaign_builder_sanitize_draft(
-                {
-                    "ad_group_name": builder_ad_group_name,
-                    "keywords": campaign_builder_parse_keyword_lines(
-                        builder_keyword_text,
-                        negative=False,
-                    ),
-                    "negative_keywords": campaign_builder_parse_keyword_lines(
-                        builder_negative_text,
-                        negative=True,
-                    ),
-                    "headlines": [
-                        line.strip()
-                        for line in builder_headlines_text.splitlines()
-                        if line.strip()
+                    "daily_budget": float(builder_daily_budget),
+                    "location_text": builder_location.strip(),
+                    "languages": sorted(builder_languages),
+                    "language_ids": [
+                        CAMPAIGN_BUILDER_LANGUAGE_IDS[name]
+                        for name in sorted(builder_languages)
                     ],
-                    "descriptions": [
-                        line.strip()
-                        for line in builder_descriptions_text.splitlines()
-                        if line.strip()
-                    ],
-                    "path1": builder_path1,
-                    "path2": builder_path2,
-                },
-                builder_service,
-                builder_location,
-            )
+                    "bidding_strategy": builder_bidding,
+                    "manual_cpc_bid": float(builder_manual_cpc),
+                    "ad_groups": edited_groups,
+                }
 
-            builder_core_payload = {
-                "service": builder_service,
-                "campaign_name": campaign_builder_clip_text(
-                    builder_campaign_name,
-                    255,
-                ),
-                "daily_budget": float(builder_daily_budget),
-                "location_text": builder_location.strip(),
-                "languages": sorted(builder_languages),
-                "language_ids": [
-                    CAMPAIGN_BUILDER_LANGUAGE_IDS[name]
-                    for name in sorted(builder_languages)
-                ],
-                "bidding_strategy": builder_bidding,
-                "manual_cpc_bid": float(builder_manual_cpc),
-                "final_url": builder_final_url.strip(),
-                "ad_group_name": current_builder_draft["ad_group_name"],
-                "keywords": current_builder_draft["keywords"],
-                "negative_keywords": current_builder_draft[
-                    "negative_keywords"
-                ],
-                "headlines": current_builder_draft["headlines"],
-                "descriptions": current_builder_draft["descriptions"],
-                "path1": current_builder_draft["path1"],
-                "path2": current_builder_draft["path2"],
-            }
+                builder_current_fingerprint = campaign_builder_fingerprint(
+                    builder_core_payload
+                )
 
-            builder_current_fingerprint = campaign_builder_fingerprint(
-                builder_core_payload
-            )
+                # Policy exemptions are tied to exact mutate-operation indexes.
+                # Clear stale candidates as soon as the editable draft changes.
+                if st.session_state.get("campaign_builder_policy_candidate_fingerprint") not in (
+                    None, builder_current_fingerprint
+                ):
+                    for state_key in (
+                        "campaign_builder_policy_candidate_fingerprint",
+                        "campaign_builder_policy_candidate_rows",
+                        "campaign_builder_policy_candidate_map",
+                        "campaign_builder_policy_candidate_reason",
+                        "campaign_builder_policy_candidate_eligible",
+                        "campaign_builder_policy_cleared",
+                    ):
+                        st.session_state.pop(state_key, None)
 
-            st.subheader("🔎 Campaign Preview")
-
-            preview_settings = pd.DataFrame(
-                [
+                st.subheader("🔎 Multi-Ad-Group Campaign Preview")
+                preview_rows = [
                     ["Campaign", builder_core_payload["campaign_name"]],
                     ["Status", "PAUSED"],
-                    ["Service", builder_service],
                     ["Daily Budget", f"₹{builder_daily_budget:,.2f}"],
+                    ["Budget Type", "Dedicated / Non-shared"],
                     ["Location", builder_location],
                     ["Languages", ", ".join(builder_languages)],
                     ["Bidding", builder_bidding],
-                    ["Final URL", builder_final_url],
-                    ["Ad Group", builder_core_payload["ad_group_name"]],
-                    ["Keywords", len(builder_core_payload["keywords"])],
+                    ["Ad Groups", len(edited_groups)],
+                    ["Total Selected Keywords", sum(len(g["keywords"]) for g in edited_groups)],
                     [
-                        "Negative Keywords",
-                        len(builder_core_payload["negative_keywords"]),
+                        "Total Negative Keywords",
+                        sum(len(g.get("negative_keywords", [])) for g in edited_groups),
                     ],
-                    ["Headlines", len(builder_core_payload["headlines"])],
-                    [
-                        "Descriptions",
-                        len(builder_core_payload["descriptions"]),
-                    ],
-                ],
-                columns=["Setting", "Value"],
-            )
-            st.dataframe(preview_settings, hide_index=True, width="stretch")
-
-            preview_col1, preview_col2 = st.columns(2)
-
-            with preview_col1:
-                st.markdown("**Keywords**")
+                ]
                 st.dataframe(
-                    pd.DataFrame(builder_core_payload["keywords"]),
+                    pd.DataFrame(preview_rows, columns=["Setting", "Value"]),
                     hide_index=True,
                     width="stretch",
                 )
 
-                st.markdown("**Negative Keywords**")
-                if builder_core_payload["negative_keywords"]:
-                    st.dataframe(
-                        pd.DataFrame(
-                            builder_core_payload["negative_keywords"]
-                        ),
-                        hide_index=True,
-                        width="stretch",
-                    )
-                else:
-                    st.caption("No campaign-level negative keywords in this draft.")
-
-            with preview_col2:
-                st.markdown("**Responsive Search Ad**")
-                st.write("Headlines:")
-                for headline in builder_core_payload["headlines"]:
-                    st.write(f"• {headline}")
-
-                st.write("Descriptions:")
-                for description in builder_core_payload["descriptions"]:
-                    st.write(f"• {description}")
-
-            builder_validation_errors = []
-
-            if not builder_core_payload["campaign_name"]:
-                builder_validation_errors.append("Campaign Name is required.")
-
-            if not campaign_builder_valid_url(builder_core_payload["final_url"]):
-                builder_validation_errors.append("Final URL is invalid.")
-
-            if not builder_languages:
-                builder_validation_errors.append("Select at least one language.")
-
-            if len(builder_core_payload["keywords"]) < 1:
-                builder_validation_errors.append("At least one keyword is required.")
-
-            if len(builder_core_payload["headlines"]) < 3:
-                builder_validation_errors.append(
-                    "Responsive Search Ad requires at least 3 headlines."
+                ad_group_summary = pd.DataFrame(
+                    [
+                        {
+                            "Ad Group": g["ad_group_name"],
+                            "Service": g["service"],
+                            "Keywords": len(g["keywords"]),
+                            "Negatives": len(g.get("negative_keywords", [])),
+                            "Headlines": len(g["headlines"]),
+                            "Descriptions": len(g["descriptions"]),
+                            "Final URL": g["final_url"],
+                        }
+                        for g in edited_groups
+                    ]
                 )
+                st.dataframe(ad_group_summary, hide_index=True, width="stretch")
 
-            if len(builder_core_payload["descriptions"]) < 2:
-                builder_validation_errors.append(
-                    "Responsive Search Ad requires at least 2 descriptions."
-                )
+                builder_validation_errors = []
+                if not builder_core_payload["campaign_name"]:
+                    builder_validation_errors.append("Campaign Name is required.")
+                if not builder_languages:
+                    builder_validation_errors.append("Select at least one language.")
+                if not edited_groups:
+                    builder_validation_errors.append("At least one Ad Group is required.")
 
-            if builder_validation_errors:
+                seen_group_names = set()
+                for g in edited_groups:
+                    label = g["service"]
+                    if g["ad_group_name"].casefold() in seen_group_names:
+                        builder_validation_errors.append(
+                            f"{label}: Ad Group Name must be unique."
+                        )
+                    seen_group_names.add(g["ad_group_name"].casefold())
+
+                    if not campaign_builder_valid_url(g["final_url"]):
+                        builder_validation_errors.append(
+                            f"{label}: Final URL is invalid."
+                        )
+                    if len(g["keywords"]) < 1:
+                        builder_validation_errors.append(
+                            f"{label}: At least one positive keyword is required."
+                        )
+                    if len(g["headlines"]) < 3:
+                        builder_validation_errors.append(
+                            f"{label}: RSA requires at least 3 headlines."
+                        )
+                    if len(g["descriptions"]) < 2:
+                        builder_validation_errors.append(
+                            f"{label}: RSA requires at least 2 descriptions."
+                        )
+
                 for builder_error in builder_validation_errors:
                     st.error(builder_error)
 
-            validate_campaign_button = st.button(
-                "🧪 Validate Full Campaign — No Changes",
-                key="validate_ai_campaign_builder",
-                disabled=bool(builder_validation_errors),
-                width="stretch",
-            )
-
-            if validate_campaign_button:
-                try:
-                    with st.spinner(
-                        "Resolving location and validating the full Google Ads campaign..."
-                    ):
-                        resolved_location = campaign_builder_resolve_location(
-                            client,
-                            builder_location,
-                        )
-
-                        validated_payload = dict(builder_core_payload)
-                        validated_payload["location_resource_name"] = (
-                            resolved_location["resource_name"]
-                        )
-
-                        campaign_builder_mutate(
-                            client,
-                            ga_service,
-                            customer_id,
-                            validated_payload,
-                            validate_only=True,
-                        )
-
-                    st.session_state[
-                        "campaign_builder_validated_fingerprint"
-                    ] = builder_current_fingerprint
-                    st.session_state[
-                        "campaign_builder_validated_location"
-                    ] = resolved_location
-
-                    st.success(
-                        "✅ VALIDATION PASS — Google Ads accepted the full request. "
-                        "Nothing was created."
+                audit_col1, audit_col2 = st.columns([1, 3])
+                with audit_col1:
+                    run_local_audit = st.button(
+                        "🔒 Local Request Audit",
+                        key="campaign_builder_local_request_audit",
+                        disabled=bool(builder_validation_errors),
+                        width="stretch",
                     )
+                with audit_col2:
                     st.caption(
-                        "Resolved location: "
-                        f"{resolved_location.get('canonical_name') or resolved_location.get('name')}"
+                        "Checks the dedicated non-shared budget and temporary resource references locally. "
+                        "This does not mutate Google Ads."
                     )
 
-                except Exception as builder_validate_error:
-                    st.session_state.pop(
-                        "campaign_builder_validated_fingerprint",
-                        None,
-                    )
-                    st.session_state.pop(
-                        "campaign_builder_validated_location",
-                        None,
-                    )
-                    st.error("❌ VALIDATION FAILED")
-                    st.code(
-                        campaign_builder_format_google_ads_error(
-                            builder_validate_error
+                if run_local_audit:
+                    try:
+                        audit_location = campaign_builder_resolve_location(
+                            client, builder_location
                         )
-                    )
+                        audit_payload = dict(builder_core_payload)
+                        audit_payload["location_resource_name"] = audit_location["resource_name"]
+                        audit_info = campaign_builder_request_audit(
+                            client, customer_id, audit_payload
+                        )
+                        st.success(
+                            "✅ LOCAL REQUEST AUDIT PASS — budget is dedicated/non-shared and references are consistent."
+                        )
+                        st.json(audit_info)
+                    except Exception as local_audit_error:
+                        st.error(f"❌ LOCAL REQUEST AUDIT FAILED: {local_audit_error}")
 
-            validated_fingerprint = st.session_state.get(
-                "campaign_builder_validated_fingerprint"
-            )
-            validation_is_current = (
-                validated_fingerprint == builder_current_fingerprint
-            )
-
-            if validation_is_current:
-                st.success(
-                    "✅ Current draft is validated and ready for PAUSED creation."
-                )
-            elif validated_fingerprint:
-                st.warning(
-                    "Draft settings changed after validation. "
-                    "Run Validate Full Campaign again before creating."
-                )
-            else:
-                st.caption(
-                    "Run Validate Full Campaign first. "
-                    "Create stays locked until validation passes."
+                validate_campaign_button = st.button(
+                    "🧪 Validate Full Multi-Ad-Group Campaign — No Changes",
+                    key="validate_ai_campaign_builder_multi",
+                    disabled=bool(builder_validation_errors),
+                    width="stretch",
                 )
 
-            builder_confirm_create = st.checkbox(
-                "I confirm: create this campaign in Google Ads as PAUSED.",
-                key="campaign_builder_confirm_create",
-            )
+                if validate_campaign_button:
+                    try:
+                        with st.spinner(
+                            "Resolving location and validating the full Google Ads campaign..."
+                        ):
+                            resolved_location = campaign_builder_resolve_location(
+                                client,
+                                builder_location,
+                            )
+                            validated_payload = dict(builder_core_payload)
+                            validated_payload["location_resource_name"] = (
+                                resolved_location["resource_name"]
+                            )
+                            campaign_builder_mutate(
+                                client,
+                                ga_service,
+                                customer_id,
+                                validated_payload,
+                                validate_only=True,
+                            )
 
-            create_campaign_button = st.button(
-                "🚀 Create PAUSED Campaign in Google Ads",
-                key="create_ai_campaign_builder",
-                disabled=(
-                    bool(builder_validation_errors)
-                    or not validation_is_current
-                    or not builder_confirm_create
-                ),
-                width="stretch",
-            )
+                        st.session_state[
+                            "campaign_builder_validated_policy_exemptions"
+                        ] = {}
+                        st.session_state[
+                            "campaign_builder_validated_fingerprint"
+                        ] = campaign_builder_validation_fingerprint(
+                            builder_core_payload, {}
+                        )
+                        st.session_state[
+                            "campaign_builder_validated_location"
+                        ] = resolved_location
+                        for state_key in (
+                            "campaign_builder_policy_candidate_fingerprint",
+                            "campaign_builder_policy_candidate_rows",
+                            "campaign_builder_policy_candidate_map",
+                            "campaign_builder_policy_candidate_reason",
+                            "campaign_builder_policy_candidate_eligible",
+                            "campaign_builder_policy_cleared",
+                        ):
+                            st.session_state.pop(state_key, None)
 
-            if create_campaign_button:
-                try:
-                    validated_location = st.session_state.get(
-                        "campaign_builder_validated_location"
-                    )
-
-                    if not validated_location:
-                        raise ValueError(
-                            "Validated location is missing. Please validate again."
+                        st.success(
+                            "✅ VALIDATION PASS — Google Ads accepted the full multi-ad-group request. Nothing was created."
+                        )
+                        st.caption(
+                            "Resolved location: "
+                            f"{resolved_location.get('canonical_name') or resolved_location.get('name')}"
                         )
 
-                    create_payload = dict(builder_core_payload)
-                    create_payload["location_resource_name"] = (
-                        validated_location["resource_name"]
-                    )
-
-                    with st.spinner(
-                        "Creating budget, PAUSED campaign, targeting, ad group, "
-                        "keywords and responsive search ad..."
-                    ):
-                        create_response = campaign_builder_mutate(
-                            client,
-                            ga_service,
-                            customer_id,
-                            create_payload,
-                            validate_only=False,
+                    except Exception as builder_validate_error:
+                        st.session_state.pop(
+                            "campaign_builder_validated_fingerprint",
+                            None,
+                        )
+                        st.session_state.pop(
+                            "campaign_builder_validated_location",
+                            None,
+                        )
+                        st.error("❌ VALIDATION FAILED")
+                        policy_analysis = campaign_builder_extract_policy_exemptions(
+                            builder_validate_error,
+                            validated_payload if "validated_payload" in locals() else builder_core_payload,
+                        )
+                        policy_rows = policy_analysis.get("rows", [])
+                        if policy_rows:
+                            st.session_state["campaign_builder_policy_candidate_fingerprint"] = builder_current_fingerprint
+                            st.session_state["campaign_builder_policy_candidate_rows"] = policy_rows
+                            st.session_state["campaign_builder_policy_candidate_map"] = policy_analysis.get(
+                                "exemptions_by_operation", {}
+                            )
+                            st.session_state["campaign_builder_policy_candidate_reason"] = policy_analysis.get(
+                                "reason", ""
+                            )
+                            st.session_state["campaign_builder_policy_candidate_eligible"] = bool(
+                                policy_analysis.get("eligible", False)
+                            )
+                            st.markdown("#### 🚫 Exact Keyword / Policy Details")
+                            st.dataframe(
+                                pd.DataFrame(policy_rows),
+                                hide_index=True,
+                                width="stretch",
+                            )
+                            st.caption(
+                                "Only edit/remove the keyword(s) shown above, or use the manual exemption flow below when every violation is exemptible."
+                            )
+                        st.code(
+                            campaign_builder_format_google_ads_error(
+                                builder_validate_error,
+                                validated_payload if "validated_payload" in locals() else builder_core_payload,
+                            )
                         )
 
-                    campaign_resource_name = (
-                        create_response.mutate_operation_responses[1]
-                        .campaign_result.resource_name
-                    )
-                    campaign_id = campaign_resource_name.rsplit("/", 1)[-1]
+                # Persist policy details across reruns so the user can manually
+                # approve a Google-supported exemption-key re-validation.
+                candidate_is_current = (
+                    st.session_state.get("campaign_builder_policy_candidate_fingerprint")
+                    == builder_current_fingerprint
+                )
+                candidate_rows = (
+                    st.session_state.get("campaign_builder_policy_candidate_rows", [])
+                    if candidate_is_current
+                    else []
+                )
+                candidate_map = (
+                    st.session_state.get("campaign_builder_policy_candidate_map", {})
+                    if candidate_is_current
+                    else {}
+                )
+                candidate_eligible = bool(
+                    st.session_state.get("campaign_builder_policy_candidate_eligible", False)
+                ) if candidate_is_current else False
 
-                    st.session_state[
-                        "campaign_builder_last_created_campaign_id"
-                    ] = campaign_id
-                    st.session_state[
-                        "campaign_builder_last_created_resource"
-                    ] = campaign_resource_name
-                    st.session_state.pop(
-                        "campaign_builder_validated_fingerprint",
-                        None,
+                if candidate_rows:
+                    st.markdown("### 🛡️ Keyword Policy Exemption Review")
+                    st.dataframe(
+                        pd.DataFrame(candidate_rows),
+                        hide_index=True,
+                        width="stretch",
                     )
-                    st.session_state.pop(
-                        "campaign_builder_validated_location",
-                        None,
+                    if candidate_eligible:
+                        st.info(
+                            "Google marked every returned keyword policy violation as exemptible. "
+                            "The button below is the manual approval step: it attaches the exact PolicyViolationKey values "
+                            "returned by Google and re-validates only. It does not create, enable, or spend anything."
+                        )
+                        st.caption(
+                            f"Ready to request exemption for {sum(len(v) for v in candidate_map.values())} policy key(s) "
+                            f"across {len(candidate_map)} keyword operation(s)."
+                        )
+                        revalidate_with_exemptions = st.button(
+                            "🛡️ Approve All Exemptible Keywords & Re-Validate — No Changes",
+                            key="campaign_builder_revalidate_policy_exemptions",
+                            width="stretch",
+                        )
+                        if revalidate_with_exemptions:
+                            try:
+                                clean_candidate_map, exemption_key_count = (
+                                    campaign_builder_validate_policy_exemption_map(
+                                        builder_core_payload, candidate_map
+                                    )
+                                )
+                                with st.spinner(
+                                    "Applying the returned exemption keys to the exact keyword operations and re-validating..."
+                                ):
+                                    resolved_location = campaign_builder_resolve_location(
+                                        client, builder_location
+                                    )
+                                    exempt_payload = dict(builder_core_payload)
+                                    exempt_payload["location_resource_name"] = resolved_location["resource_name"]
+                                    exempt_payload["policy_exemptions_by_operation"] = clean_candidate_map
+                                    audit_info = campaign_builder_request_audit(
+                                        client, customer_id, exempt_payload
+                                    )
+                                    if int(audit_info.get("approved_policy_exemption_keys", 0)) != int(exemption_key_count):
+                                        raise ValueError(
+                                            "Local exemption audit mismatch: not every approved policy key was attached to the request."
+                                        )
+                                    campaign_builder_mutate(
+                                        client,
+                                        ga_service,
+                                        customer_id,
+                                        exempt_payload,
+                                        validate_only=True,
+                                    )
+
+                                st.session_state[
+                                    "campaign_builder_validated_policy_exemptions"
+                                ] = clean_candidate_map
+                                st.session_state[
+                                    "campaign_builder_validated_fingerprint"
+                                ] = campaign_builder_validation_fingerprint(
+                                    builder_core_payload, clean_candidate_map
+                                )
+                                st.session_state[
+                                    "campaign_builder_validated_location"
+                                ] = resolved_location
+                                st.session_state["campaign_builder_policy_cleared"] = True
+                                st.success(
+                                    "✅ POLICY PROBLEM CLEARED IN VALIDATION — Google accepted the full request with the approved exemption keys. Nothing was created."
+                                )
+                                st.caption(
+                                    "The same approved keys are locked to this exact draft and will be included only if you later confirm PAUSED creation."
+                                )
+                            except Exception as exemption_validate_error:
+                                st.session_state.pop(
+                                    "campaign_builder_validated_fingerprint", None
+                                )
+                                st.session_state.pop(
+                                    "campaign_builder_validated_policy_exemptions", None
+                                )
+                                st.session_state["campaign_builder_policy_cleared"] = False
+                                followup_analysis = campaign_builder_extract_policy_exemptions(
+                                    exemption_validate_error,
+                                    exempt_payload if "exempt_payload" in locals() else builder_core_payload,
+                                )
+                                if followup_analysis.get("rows"):
+                                    merged_map = campaign_builder_merge_policy_exemption_maps(
+                                        candidate_map, followup_analysis.get("exemptions_by_operation", {})
+                                    )
+                                    st.session_state["campaign_builder_policy_candidate_rows"] = followup_analysis.get("rows", [])
+                                    st.session_state["campaign_builder_policy_candidate_map"] = merged_map
+                                    st.session_state["campaign_builder_policy_candidate_eligible"] = bool(
+                                        followup_analysis.get("eligible", False)
+                                    )
+                                    st.session_state["campaign_builder_policy_candidate_reason"] = followup_analysis.get("reason", "")
+                                st.error("❌ POLICY EXEMPTION RE-VALIDATION FAILED")
+                                st.code(
+                                    campaign_builder_format_google_ads_error(
+                                        exemption_validate_error,
+                                        exempt_payload if "exempt_payload" in locals() else builder_core_payload,
+                                    )
+                                )
+                                st.caption(
+                                    "If Google returns the same exemptible policy again after the correct keys were attached, the keyword cannot be cleared automatically in this builder; edit/remove that keyword or review the policy in Google Ads."
+                                )
+                    else:
+                        st.warning(
+                            st.session_state.get(
+                                "campaign_builder_policy_candidate_reason",
+                                "At least one violation is not eligible for automated exemption handling."
+                            )
+                        )
+                        st.caption(
+                            "Edit/remove the non-exemptible keyword(s), then run normal validation again."
+                        )
+
+                validated_fingerprint = st.session_state.get(
+                    "campaign_builder_validated_fingerprint"
+                )
+                validated_policy_exemptions = st.session_state.get(
+                    "campaign_builder_validated_policy_exemptions", {}
+                ) or {}
+                validation_is_current = (
+                    validated_fingerprint
+                    == campaign_builder_validation_fingerprint(
+                        builder_core_payload, validated_policy_exemptions
                     )
-                    st.success(
-                        "✅ Campaign created successfully as PAUSED. "
-                        f"Google Ads Campaign ID: {campaign_id}"
-                    )
+                )
+
+                if validation_is_current:
+                    if validated_policy_exemptions:
+                        st.success(
+                            "✅ Current draft is validated with approved policy exemption keys and ready for PAUSED creation."
+                        )
+                        st.caption(
+                            f"Policy status: CLEARED FOR THIS VALIDATED REQUEST • Approved exemption keys: "
+                            f"{sum(len(v) for v in validated_policy_exemptions.values())}"
+                        )
+                        st.caption(
+                            "The final create request will include the same approved exemption keys. Campaign creation remains PAUSED."
+                        )
+                    else:
+                        st.success(
+                            "✅ Current multi-ad-group draft is validated and ready for PAUSED creation."
+                        )
+                elif validated_fingerprint:
                     st.warning(
-                        "Do not enable it until you review budget, location, "
-                        "keywords, negatives, ad copy and conversion settings in Google Ads."
+                        "Draft settings changed after validation. Run Validate again before creating."
+                    )
+                else:
+                    st.caption(
+                        "Run Validate first. Create stays locked until validation passes."
                     )
 
-                except Exception as builder_create_error:
-                    st.error("❌ Campaign creation failed. No partial campaign should be created because the request is atomic.")
-                    st.code(
-                        campaign_builder_format_google_ads_error(
-                            builder_create_error
+                builder_confirm_create = st.checkbox(
+                    "I confirm: create this multi-ad-group campaign in Google Ads as PAUSED.",
+                    key="campaign_builder_confirm_create_multi",
+                )
+
+                create_campaign_button = st.button(
+                    "🚀 Create PAUSED Multi-Ad-Group Campaign in Google Ads",
+                    key="create_ai_campaign_builder_multi",
+                    disabled=(
+                        bool(builder_validation_errors)
+                        or not validation_is_current
+                        or not builder_confirm_create
+                    ),
+                    width="stretch",
+                )
+
+                if create_campaign_button:
+                    try:
+                        validated_location = st.session_state.get(
+                            "campaign_builder_validated_location"
                         )
-                    )
+                        if not validated_location:
+                            raise ValueError(
+                                "Validated location is missing. Please validate again."
+                            )
 
-        else:
-            st.caption(
-                "Choose the campaign settings above and click "
-                "Generate AI Campaign Draft."
-            )
+                        create_payload = dict(builder_core_payload)
+                        create_payload["location_resource_name"] = (
+                            validated_location["resource_name"]
+                        )
+                        create_policy_exemptions = st.session_state.get(
+                            "campaign_builder_validated_policy_exemptions", {}
+                        ) or {}
+                        if create_policy_exemptions:
+                            create_payload["policy_exemptions_by_operation"] = (
+                                create_policy_exemptions
+                            )
 
-        # ==================================================
-        # ASK AI
-        # ==================================================
+                        if campaign_builder_validation_fingerprint(
+                            builder_core_payload, create_policy_exemptions
+                        ) != st.session_state.get(
+                            "campaign_builder_validated_fingerprint"
+                        ):
+                            raise ValueError(
+                                "Draft or approved policy exemptions changed after validation. Validate again before creating."
+                            )
+
+                        with st.spinner(
+                            "Creating the full campaign as PAUSED in Google Ads..."
+                        ):
+                            create_response = campaign_builder_mutate(
+                                client,
+                                ga_service,
+                                customer_id,
+                                create_payload,
+                                validate_only=False,
+                            )
+
+                        created_names = []
+                        for result in getattr(create_response, "mutate_operation_responses", []):
+                            for attr in (
+                                "campaign_result",
+                                "campaign_budget_result",
+                                "ad_group_result",
+                            ):
+                                obj = getattr(result, attr, None)
+                                rn = getattr(obj, "resource_name", "") if obj else ""
+                                if rn:
+                                    created_names.append(rn)
+
+                        st.success(
+                            "✅ Campaign created as PAUSED. It cannot serve until you manually enable it in Google Ads."
+                        )
+                        if created_names:
+                            st.code("\n".join(created_names[:20]))
+
+                        st.session_state.pop(
+                            "campaign_builder_validated_fingerprint",
+                            None,
+                        )
+                        st.session_state.pop(
+                            "campaign_builder_validated_location",
+                            None,
+                        )
+                        st.session_state.pop(
+                            "campaign_builder_validated_policy_exemptions",
+                            None,
+                        )
+
+                    except Exception as builder_create_error:
+                        st.error("❌ CAMPAIGN CREATION FAILED")
+                        st.code(
+                            campaign_builder_format_google_ads_error(
+                                builder_create_error
+                            )
+                        )
 
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
