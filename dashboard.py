@@ -22,7 +22,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-09-07-v23-remove-comparison-daily-graphs"
+CAMPAIGN_BUILDER_BUILD = "2026-09-08-v24-policy-exemption-index-fix"
 
 # ==================================================
 # CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
@@ -692,7 +692,14 @@ def campaign_builder_fingerprint(payload):
 
 
 def campaign_builder_operation_manifest(payload):
-    """Return metadata aligned 1:1 with campaign_builder_build_operations()."""
+    """Return metadata aligned 1:1 with campaign_builder_build_operations().
+
+    IMPORTANT: Google Ads policy errors report mutate_operations[index]. That
+    index is for the *entire* atomic request, including campaign-level asset
+    create/link operations. Keep this manifest in the exact same order as
+    campaign_builder_build_operations() so policy exemption keys are attached
+    back to the correct keyword operation.
+    """
     manifest = [
         {"kind": "campaign_budget", "label": "Campaign Budget"},
         {"kind": "campaign", "label": "Campaign"},
@@ -705,6 +712,61 @@ def campaign_builder_operation_manifest(payload):
                 "kind": "language",
                 "label": "Language Target",
                 "language_id": language_id,
+            }
+        )
+
+    # Campaign-level assets are created BEFORE ad groups in the mutate request.
+    # Each sitelink/callout/call uses two operations: create asset + link asset.
+    for sitelink in payload.get("sitelinks", [])[:6]:
+        manifest.append(
+            {
+                "kind": "asset",
+                "label": "Sitelink Asset",
+                "asset_type": "SITELINK",
+                "asset_text": sitelink.get("link_text", ""),
+            }
+        )
+        manifest.append(
+            {
+                "kind": "campaign_asset",
+                "label": "Sitelink Campaign Link",
+                "asset_type": "SITELINK",
+            }
+        )
+
+    for callout_text in payload.get("callouts", [])[:10]:
+        manifest.append(
+            {
+                "kind": "asset",
+                "label": "Callout Asset",
+                "asset_type": "CALLOUT",
+                "asset_text": callout_text,
+            }
+        )
+        manifest.append(
+            {
+                "kind": "campaign_asset",
+                "label": "Callout Campaign Link",
+                "asset_type": "CALLOUT",
+            }
+        )
+
+    call_asset_cfg = payload.get("call_asset", {}) or {}
+    if bool(call_asset_cfg.get("enabled")) and str(
+        call_asset_cfg.get("phone_number", "")
+    ).strip():
+        manifest.append(
+            {
+                "kind": "asset",
+                "label": "Call Asset",
+                "asset_type": "CALL",
+            }
+        )
+        manifest.append(
+            {
+                "kind": "campaign_asset",
+                "label": "Call Campaign Link",
+                "asset_type": "CALL",
             }
         )
 
@@ -770,7 +832,6 @@ def campaign_builder_operation_manifest(payload):
         )
 
     return manifest
-
 
 def campaign_builder_error_operation_index(item):
     """Extract the mutate operation index from GoogleAdsError.location."""
@@ -913,9 +974,14 @@ def campaign_builder_extract_policy_exemptions(error, payload=None):
 
 
 def campaign_builder_validation_fingerprint(payload, policy_exemptions=None):
-    """Fingerprint the editable draft together with any approved exemption keys."""
+    """Fingerprint build + editable draft + approved exemption keys.
+
+    Including the build ID invalidates stale policy indexes after any builder
+    release that changes mutate-operation ordering.
+    """
     return campaign_builder_fingerprint(
         {
+            "build": CAMPAIGN_BUILDER_BUILD,
             "draft": payload,
             "policy_exemptions_by_operation": policy_exemptions or {},
         }
@@ -1414,6 +1480,12 @@ def campaign_builder_request_audit(client, customer_id, payload):
     """Build and locally verify the request without calling Google Ads."""
     operations = campaign_builder_build_operations(client, customer_id, payload)
     campaign_builder_assert_operations(operations)
+    manifest = campaign_builder_operation_manifest(payload)
+    if len(manifest) != len(operations):
+        raise ValueError(
+            f"Internal operation manifest mismatch: manifest={len(manifest)}, request={len(operations)}. "
+            "Policy exemption indexes are unsafe until these counts match."
+        )
 
     budget = operations[0].campaign_budget_operation.create
     campaign = operations[1].campaign_operation.create
@@ -7779,7 +7851,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 f"Call conversion detected: {detected_call_action_name or 'Primary call action'} • threshold {detected_call_threshold}s"
             )
         else:
-            st.info("Click Refresh Live Tracking Check before final creation so V23 can verify the Primary phone-call conversion action.")
+            st.info("Click Refresh Live Tracking Check before final creation so V24 can verify the Primary phone-call conversion action.")
 
         call_col1, call_col2, call_col3 = st.columns([1, 2, 1])
         with call_col1:
@@ -8639,7 +8711,10 @@ JSON SCHEMA:
                 }
 
                 builder_current_fingerprint = campaign_builder_fingerprint(
-                    builder_core_payload
+                    {
+                        "build": CAMPAIGN_BUILDER_BUILD,
+                        "draft": builder_core_payload,
+                    }
                 )
 
                 # Policy exemptions are tied to exact mutate-operation indexes.
