@@ -22,7 +22,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-09-07-v19-strong-prelaunch-quality-gates"
+CAMPAIGN_BUILDER_BUILD = "2026-09-07-v21-3-groups-quality-ready"
 
 # ==================================================
 # CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
@@ -435,7 +435,7 @@ def campaign_builder_sanitize_draft(raw_draft, service, location):
 
     keywords = campaign_builder_clean_keyword_rows(
         raw_draft.get("keywords", []),
-        max_items=20,
+        max_items=10,
         negative=False,
     )
     negatives = campaign_builder_clean_keyword_rows(
@@ -451,7 +451,7 @@ def campaign_builder_sanitize_draft(raw_draft, service, location):
                 {"text": f"{service} services", "match_type": "PHRASE"},
                 {"text": f"{service} {location}", "match_type": "EXACT"},
             ],
-            max_items=20,
+            max_items=10,
             negative=False,
         )
 
@@ -497,7 +497,7 @@ def campaign_builder_parse_keyword_lines(text, negative=False):
 
     return campaign_builder_clean_keyword_rows(
         rows,
-        max_items=15 if negative else 20,
+        max_items=15 if negative else 10,
         negative=negative,
     )
 
@@ -7602,13 +7602,12 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         )
         st.caption(f"Build: {CAMPAIGN_BUILDER_BUILD} • Dedicated budget: explicitly_shared=False")
 
+        # V21: keep this campaign intentionally tight. These are the three
+        # ad-group themes chosen for the current Hyderabad call-lead strategy.
         campaign_builder_services = [
             "Elderly Care",
-            "Patient Care",
+            "Patient Care + Bedridden Care",
             "Nursing Care",
-            "Baby Care",
-            "Caretaker",
-            "Domestic Help / Maid",
         ]
 
         builder_col1, builder_col2 = st.columns(2)
@@ -7617,9 +7616,12 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
             builder_services = st.multiselect(
                 "Services / Ad Groups",
                 campaign_builder_services,
-                default=["Elderly Care"],
-                key="campaign_builder_services_multi",
-                help="Each selected service becomes its own Search ad group.",
+                default=campaign_builder_services,
+                key="campaign_builder_services_multi_v21",
+                help=(
+                    "Recommended setup: keep all 3 selected. Each becomes a tightly themed "
+                    "Search ad group so budget and Quality Score signals are not spread too thin."
+                ),
             )
 
             default_campaign_label = (
@@ -7698,11 +7700,8 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         # This avoids sending Elderly Care and Patient Care traffic to the same page.
         campaign_builder_service_url_defaults = {
             "Elderly Care": "https://hareekrishna.com/elderly-care",
-            "Patient Care": "https://hareekrishna.com/patient-care",
+            "Patient Care + Bedridden Care": "https://hareekrishna.com/patient-care",
             "Nursing Care": "https://hareekrishna.com/nursing-care",
-            "Baby Care": "https://hareekrishna.com/baby-care",
-            "Caretaker": "https://hareekrishna.com/caretaker",
-            "Domestic Help / Maid": "https://hareekrishna.com/domestic-help",
         }
 
         builder_service_urls = {}
@@ -7734,7 +7733,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         # ==================================================
         st.markdown("### 📞 Call & Ad Assets")
         st.caption(
-            "Structured Snippets are intentionally removed. V19 creates Sitelinks, Callouts and a Call Asset in the same atomic PAUSED campaign request."
+            "Structured Snippets are intentionally removed. V21 creates 5 Sitelinks, 6+ Callouts and a Call Asset in the same atomic PAUSED campaign request."
         )
 
         live_check_col, live_status_col = st.columns([1, 2])
@@ -7835,12 +7834,13 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 key="campaign_builder_call_country_v18",
             ).strip().upper() or "IN"
 
-        st.markdown("#### 🔗 Sitelinks — 4 to 6 recommended")
+        st.markdown("#### 🔗 Sitelinks — 5 strong sitelinks configured")
         default_sitelinks = pd.DataFrame([
-            {"Link Text": "Patient Care", "Description 1": "Patient care at home", "Description 2": "Trained attendants available", "Final URL": "https://hareekrishna.com/patient-care"},
+            {"Link Text": "Elderly Care", "Description 1": "Senior care at home", "Description 2": "Support across Hyderabad", "Final URL": "https://hareekrishna.com/elderly-care"},
+            {"Link Text": "Patient Care", "Description 1": "Patient care at home", "Description 2": "Attendant support available", "Final URL": "https://hareekrishna.com/patient-care"},
             {"Link Text": "Nursing Care", "Description 1": "Home nursing support", "Description 2": "Skilled nurses for home", "Final URL": "https://hareekrishna.com/nursing-care"},
-            {"Link Text": "Elderly Care", "Description 1": "Support for senior citizens", "Description 2": "Care at home in Hyderabad", "Final URL": "https://hareekrishna.com/elderly-care"},
-            {"Link Text": "Caretaker", "Description 1": "Male and female caretakers", "Description 2": "Home support when needed", "Final URL": "https://hareekrishna.com/caretaker"},
+            {"Link Text": "Caretaker / Bedridden", "Description 1": "Caretaker support at home", "Description 2": "Help for bedridden patients", "Final URL": "https://hareekrishna.com/caretaker"},
+            {"Link Text": "Home Care Services", "Description 1": "Explore home care services", "Description 2": "Care options in Hyderabad", "Final URL": "https://hareekrishna.com/"},
         ])
         if "campaign_builder_sitelinks_v18" not in st.session_state:
             st.session_state["campaign_builder_sitelinks_v18"] = default_sitelinks
@@ -7961,9 +7961,14 @@ OWN BRAND - NEVER SUGGEST AS A NEGATIVE:
 - Shiva Kaartikeya
 - Shivakaartikeya
 
+CORE INTENT THEMES — stay close to these, but do not blindly duplicate:
+- Elderly Care: elderly care at home, senior care at home, elderly care services, elderly care Hyderabad, home care for elderly.
+- Patient Care + Bedridden Care: patient care at home, patient attendant at home, patient care Hyderabad, bedridden patient care, bedridden care at home, post-surgery patient care.
+- Nursing Care: nursing care at home, home nursing services, nurse at home, home nurse services, nursing services Hyderabad, skilled nursing at home.
+
 REQUIREMENTS FOR EACH SELECTED SERVICE:
 - Create exactly one tightly themed Search ad group.
-- 12 to 20 high-intent positive keywords.
+- Create 8 to 10 high-intent positive keywords only. Keep the list tight; do not exceed 10.
 - Prefer PHRASE and EXACT. Use BROAD only when clearly justified.
 - Do not use informational, job, course, salary, PDF, meaning or definition intent as positive keywords.
 - Create 10 to 15 clearly irrelevant negative keywords per ad group (jobs, salary, courses, training, definitions, free when inappropriate).
@@ -7972,8 +7977,8 @@ REQUIREMENTS FOR EACH SELECTED SERVICE:
 - Never make an offered service, own brand, or a generic home-care term negative just because it overlaps another ad group.
 - Create 12 to 15 unique RSA headlines, each <= 30 characters.
 - CRITICAL KEYWORD↔HEADLINE RULE: every positive keyword must have at least one RSA headline that directly or near-directly reflects the same service/search intent.
-- For the first 8 core high-intent keywords, strongly prefer an exact or very close headline phrase when the 30-character limit allows it.
-- Use roughly 8 to 10 keyword-aligned headlines and the remaining headlines for trust, availability, local intent, and call-to-action.
+- For all 8 to 10 approved high-intent keywords, strongly prefer an exact or very close headline phrase when the 30-character limit allows it.
+- Use 8 to 10 keyword-aligned headlines and the remaining headlines for trust, availability, local intent, and call-to-action.
 - Never force unrelated words into a headline just to satisfy coverage. Keep the ad group tightly themed instead.
 - Create exactly 4 unique RSA descriptions, each <= 90 characters.
 - Avoid unverifiable claims (#1, guaranteed, cheapest, best in India).
@@ -8514,7 +8519,7 @@ JSON SCHEMA:
                         approved_group = dict(group_row)
                         approved_group["keywords"] = campaign_builder_clean_keyword_rows(
                             approved_by_service.get(service_name, []),
-                            max_items=20,
+                            max_items=10,
                             negative=False,
                         )
                         approved_groups.append(approved_group)
@@ -8727,7 +8732,7 @@ JSON SCHEMA:
                 st.dataframe(ad_group_summary, hide_index=True, width="stretch")
 
                 # ==================================================
-                # V20 — KEYWORD ↔ HEADLINE COVERAGE
+                # V21 — KEYWORD ↔ HEADLINE COVERAGE
                 # ==================================================
                 keyword_headline_rows = []
                 keyword_headline_group_summary = []
@@ -8817,16 +8822,16 @@ JSON SCHEMA:
                     st.error(builder_error)
 
                 # ==================================================
-                # V20 — STRONG PRE-LAUNCH + KEYWORD/HEADLINE MATCH SAFETY CHECK
+                # V21 — 3-GROUP QUALITY-READY PRE-LAUNCH SAFETY CHECK
                 # ==================================================
                 st.subheader("🛡️ Pre-Launch Safety Check")
                 st.caption(
                     "These checks reduce avoidable setup mistakes; they cannot guarantee campaign results. Create stays locked until every required check passes and Google validation also passes."
                 )
                 st.info(
-                    "V20 quality gate: 8+ manually approved keywords + 10+ safe negatives + "
-                    "12+ RSA headlines + 4 descriptions per ad group, 100% approved keyword↔headline coverage, "
-                    "plus 4+ sitelinks and 6+ callouts."
+                    "V21 quality gate: exactly 3 focused ad groups, 8–10 manually approved keywords + "
+                    "10+ safe negatives + 12–15 RSA headlines + 4 descriptions per ad group, 100% approved "
+                    "keyword↔headline coverage, plus 5+ sitelinks and 6+ callouts. This is a readiness gate, not a result guarantee."
                 )
 
                 live_primary_call_ok = bool(
@@ -8839,8 +8844,12 @@ JSON SCHEMA:
                     and detected_call_action_resource
                 )
                 presence_ok = builder_positive_geo_type == "PRESENCE"
+                three_groups_ok = (
+                    len(edited_groups) == 3
+                    and [g.get("service") for g in edited_groups] == campaign_builder_services
+                )
                 keywords_ok = bool(edited_groups) and all(
-                    len(g.get("keywords", [])) >= 8 for g in edited_groups
+                    8 <= len(g.get("keywords", [])) <= 10 for g in edited_groups
                 )
                 negatives_ok = bool(edited_groups) and all(
                     len(g.get("negative_keywords", [])) >= 10 for g in edited_groups
@@ -8856,7 +8865,7 @@ JSON SCHEMA:
                     not in {"https://hareekrishna.com", "http://hareekrishna.com"}
                     for g in edited_groups
                 )
-                sitelinks_ok = len(builder_sitelinks) >= 4 and all(
+                sitelinks_ok = len(builder_sitelinks) >= 5 and all(
                     campaign_builder_valid_url(s.get("final_url", ""))
                     and bool(s.get("link_text"))
                     for s in builder_sitelinks
@@ -8865,15 +8874,16 @@ JSON SCHEMA:
                 paused_search_only_ok = True  # Enforced again inside campaign_builder_assert_operations().
 
                 prelaunch_checks = [
+                    ("Exactly 3 focused ad groups", three_groups_ok, ", ".join(g.get("service", "") for g in edited_groups) or "No ad groups"),
                     ("Primary 60s+ phone-call conversion active", live_primary_call_ok, f"{detected_call_action_name or 'Not detected'} • {detected_call_threshold}s" if detected_call_action_resource else "Run Refresh Live Tracking Check"),
                     ("Call Asset + business phone ready", call_asset_ready, builder_call_phone or "Phone missing"),
                     ("Location targeting = PRESENCE", presence_ok, builder_positive_geo_type),
-                    ("At least 8 approved keywords per ad group", keywords_ok, ", ".join(f"{g['service']}: {len(g.get('keywords', []))}" for g in edited_groups)),
+                    ("8–10 approved keywords per ad group", keywords_ok, ", ".join(f"{g['service']}: {len(g.get('keywords', []))}" for g in edited_groups)),
                     ("At least 10 safe irrelevant negatives per ad group", negatives_ok, ", ".join(f"{g['service']}: {len(g.get('negative_keywords', []))}" for g in edited_groups)),
                     ("RSA completeness: 12+ headlines & 4 descriptions", rsa_ok, ", ".join(f"{g['service']}: {len(g.get('headlines', []))}H/{len(g.get('descriptions', []))}D" for g in edited_groups)),
                     ("100% approved keyword ↔ headline match", keyword_headline_coverage_ok, ", ".join(f"{item['Service']}: {item['Coverage %']}%" for item in keyword_headline_group_summary) if keyword_headline_group_summary else "No approved keywords"),
                     ("Service-specific Final URLs", urls_ok, "No homepage fallback" if urls_ok else "Review Final URLs"),
-                    ("4+ Sitelinks", sitelinks_ok, f"{len(builder_sitelinks)} configured"),
+                    ("5+ Sitelinks", sitelinks_ok, f"{len(builder_sitelinks)} configured"),
                     ("6+ Callouts", callouts_ok, f"{len(builder_callouts)} configured"),
                     ("PAUSED + Google Search only", paused_search_only_ok, "Hard-coded safety rule"),
                 ]
@@ -8896,7 +8906,7 @@ JSON SCHEMA:
                     else:
                         st.warning("Fix every ❌ item before final campaign creation is unlocked.")
                 st.dataframe(check_df, hide_index=True, width="stretch")
-                st.caption("Image assets and Business Profile location assets remain recommended, but they are non-blocking in V20 because this atomic builder does not upload/link them yet.")
+                st.caption("Image assets and Business Profile location assets remain recommended, but they are non-blocking in V21 because this atomic builder does not upload/link them yet.")
 
                 audit_col1, audit_col2 = st.columns([1, 3])
                 with audit_col1:
