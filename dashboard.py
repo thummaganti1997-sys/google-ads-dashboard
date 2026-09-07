@@ -22,7 +22,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-09-01-final-multi-v12-keyword-decision"
+CAMPAIGN_BUILDER_BUILD = "2026-09-07-v19-strong-prelaunch-quality-gates"
 
 # ==================================================
 # CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
@@ -241,6 +241,87 @@ def campaign_builder_normalize_match_type(value, default="PHRASE"):
     if match_type not in {"EXACT", "PHRASE", "BROAD"}:
         return default
     return match_type
+
+
+CAMPAIGN_BUILDER_HEADLINE_MATCH_STOPWORDS = {
+    "a", "an", "and", "at", "for", "from", "in", "near", "of", "the", "to", "with",
+    "service", "services",
+}
+
+
+def campaign_builder_match_tokens(text):
+    """Return stable intent tokens for keyword↔headline relevance checks."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).strip()
+    tokens = []
+    for token in normalized.split():
+        if token in CAMPAIGN_BUILDER_HEADLINE_MATCH_STOPWORDS:
+            continue
+        # Very light normalization for common plural variants only.
+        if token.endswith("ies") and len(token) > 4:
+            token = token[:-3] + "y"
+        elif token.endswith("s") and not token.endswith("ss") and len(token) > 4:
+            token = token[:-1]
+        tokens.append(token)
+    return tokens
+
+
+def campaign_builder_keyword_headline_match(keyword, headline):
+    """Score whether a headline closely reflects a positive keyword's intent."""
+    keyword_norm = re.sub(r"[^a-z0-9]+", " ", str(keyword or "").casefold()).strip()
+    headline_norm = re.sub(r"[^a-z0-9]+", " ", str(headline or "").casefold()).strip()
+    if not keyword_norm or not headline_norm:
+        return False, 0.0
+
+    if keyword_norm in headline_norm or headline_norm in keyword_norm:
+        return True, 1.0
+
+    kw_tokens = campaign_builder_match_tokens(keyword)
+    hl_tokens = set(campaign_builder_match_tokens(headline))
+    if not kw_tokens or not hl_tokens:
+        return False, 0.0
+
+    matched = sum(1 for token in kw_tokens if token in hl_tokens)
+    coverage = matched / max(len(kw_tokens), 1)
+
+    # Short keywords need a full token match. Longer phrases can use a close
+    # near-direct headline because RSA headlines are capped at 30 characters.
+    if len(kw_tokens) <= 2:
+        passed = coverage >= 1.0
+    else:
+        passed = matched >= 2 and coverage >= 0.67
+    return passed, coverage
+
+
+def campaign_builder_keyword_headline_coverage(group):
+    """Return row-level coverage and summary for every approved positive keyword."""
+    headlines = [str(h).strip() for h in group.get("headlines", []) if str(h).strip()]
+    rows = []
+    for keyword_row in group.get("keywords", []):
+        keyword = str(keyword_row.get("text", "")).strip()
+        best_headline = ""
+        best_score = 0.0
+        best_pass = False
+        for headline in headlines:
+            passed, score = campaign_builder_keyword_headline_match(keyword, headline)
+            if score > best_score:
+                best_headline = headline
+                best_score = score
+                best_pass = passed
+            elif score == best_score and passed and not best_pass:
+                best_headline = headline
+                best_pass = True
+        rows.append({
+            "Service": group.get("service", "Service"),
+            "Keyword": keyword,
+            "Matched Headline": best_headline or "—",
+            "Match %": round(best_score * 100),
+            "Status": "✅ MATCH" if best_pass else "❌ NEED HEADLINE",
+            "Pass": bool(best_pass),
+        })
+    total = len(rows)
+    matched = sum(1 for row in rows if row["Pass"])
+    pct = (matched / total * 100.0) if total else 0.0
+    return rows, matched, total, pct
 
 
 def campaign_builder_clean_keyword_rows(rows, max_items=20, negative=False):
@@ -1073,6 +1154,27 @@ def campaign_builder_build_operations(client, customer_id, payload):
     campaign.network_settings.target_search_network = False
     campaign.network_settings.target_partner_search_network = False
     campaign.network_settings.target_content_network = False
+
+    # V18: Local-service campaigns should target people physically present in
+    # the selected area, not people elsewhere merely showing interest in it.
+    # The UI can expose the broader mode for testing, but the pre-launch gate
+    # only passes when PRESENCE is selected.
+    positive_geo_mode = str(payload.get("positive_geo_target_type", "PRESENCE")).upper()
+    if positive_geo_mode == "PRESENCE_OR_INTEREST":
+        campaign.geo_target_type_setting.positive_geo_target_type = (
+            client.enums.PositiveGeoTargetTypeEnum.PRESENCE_OR_INTEREST
+        )
+    else:
+        campaign.geo_target_type_setting.positive_geo_target_type = (
+            client.enums.PositiveGeoTargetTypeEnum.PRESENCE
+        )
+    try:
+        campaign.geo_target_type_setting.negative_geo_target_type = (
+            client.enums.NegativeGeoTargetTypeEnum.PRESENCE
+        )
+    except Exception:
+        pass
+
     campaign.contains_eu_political_advertising = (
         client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
     )
@@ -1099,6 +1201,84 @@ def campaign_builder_build_operations(client, customer_id, payload):
         criterion.language.language_constant = f"languageConstants/{language_id}"
         operations.append(mutate)
 
+    # 5. Campaign assets: sitelinks, callouts and call asset. Structured
+    # snippets are intentionally not created in V18. All assets use unique
+    # temporary IDs so GoogleAdsService.Mutate can validate/create atomically.
+    asset_service = client.get_service("AssetService")
+    next_asset_temp_id = -5000
+
+    for sitelink in payload.get("sitelinks", [])[:6]:
+        mutate = client.get_type("MutateOperation")
+        asset = mutate.asset_operation.create
+        asset_resource = asset_service.asset_path(customer_id, next_asset_temp_id)
+        next_asset_temp_id -= 1
+        asset.resource_name = asset_resource
+        asset.sitelink_asset.link_text = campaign_builder_clip_text(
+            sitelink.get("link_text", ""), 25
+        )
+        description1 = campaign_builder_clip_text(sitelink.get("description1", ""), 35)
+        description2 = campaign_builder_clip_text(sitelink.get("description2", ""), 35)
+        if description1 and description2:
+            asset.sitelink_asset.description1 = description1
+            asset.sitelink_asset.description2 = description2
+        final_url = str(sitelink.get("final_url", "") or "").strip()
+        if final_url:
+            asset.final_urls.append(final_url)
+        operations.append(mutate)
+
+        link_op = client.get_type("MutateOperation")
+        campaign_asset = link_op.campaign_asset_operation.create
+        campaign_asset.campaign = campaign_resource
+        campaign_asset.asset = asset_resource
+        campaign_asset.field_type = client.enums.AssetFieldTypeEnum.SITELINK
+        operations.append(link_op)
+
+    for callout_text in payload.get("callouts", [])[:10]:
+        mutate = client.get_type("MutateOperation")
+        asset = mutate.asset_operation.create
+        asset_resource = asset_service.asset_path(customer_id, next_asset_temp_id)
+        next_asset_temp_id -= 1
+        asset.resource_name = asset_resource
+        asset.callout_asset.callout_text = campaign_builder_clip_text(callout_text, 25)
+        operations.append(mutate)
+
+        link_op = client.get_type("MutateOperation")
+        campaign_asset = link_op.campaign_asset_operation.create
+        campaign_asset.campaign = campaign_resource
+        campaign_asset.asset = asset_resource
+        campaign_asset.field_type = client.enums.AssetFieldTypeEnum.CALLOUT
+        operations.append(link_op)
+
+    call_asset_cfg = payload.get("call_asset", {}) or {}
+    if bool(call_asset_cfg.get("enabled")) and str(call_asset_cfg.get("phone_number", "")).strip():
+        mutate = client.get_type("MutateOperation")
+        asset = mutate.asset_operation.create
+        asset_resource = asset_service.asset_path(customer_id, next_asset_temp_id)
+        next_asset_temp_id -= 1
+        asset.resource_name = asset_resource
+        asset.call_asset.country_code = str(call_asset_cfg.get("country_code", "IN") or "IN").upper()
+        asset.call_asset.phone_number = str(call_asset_cfg.get("phone_number", "")).strip()
+        conversion_action_resource = str(
+            call_asset_cfg.get("conversion_action_resource", "") or ""
+        ).strip()
+        if conversion_action_resource:
+            asset.call_asset.call_conversion_action = conversion_action_resource
+            asset.call_asset.call_conversion_reporting_state = (
+                client.enums.CallConversionReportingStateEnum.USE_RESOURCE_LEVEL_CALL_CONVERSION_ACTION
+            )
+        else:
+            asset.call_asset.call_conversion_reporting_state = (
+                client.enums.CallConversionReportingStateEnum.USE_ACCOUNT_LEVEL_CALL_CONVERSION_ACTION
+            )
+        operations.append(mutate)
+
+        link_op = client.get_type("MutateOperation")
+        campaign_asset = link_op.campaign_asset_operation.create
+        campaign_asset.campaign = campaign_resource
+        campaign_asset.asset = asset_resource
+        campaign_asset.field_type = client.enums.AssetFieldTypeEnum.CALL
+        operations.append(link_op)
+
     # Backward compatibility: accept the old single-ad-group payload too.
     ad_groups = payload.get("ad_groups")
     if not ad_groups:
@@ -1114,7 +1294,7 @@ def campaign_builder_build_operations(client, customer_id, payload):
             "final_url": payload["final_url"],
         }]
 
-    # 5+. Create each ad group and its own keyword set / negatives / RSA.
+    # 6+. Create each ad group and its own keyword set / negatives / RSA.
     for index, group in enumerate(ad_groups):
         # Negative temporary IDs are unique across the whole mutate request.
         ad_group_temp_id = -100 - index
@@ -1222,6 +1402,12 @@ def campaign_builder_assert_operations(operations):
         raise ValueError(
             "Safety check failed: campaign does not reference the temporary budget."
         )
+    if bool(getattr(campaign_create.network_settings, "target_search_network", False)):
+        raise ValueError("Safety check failed: Search Network expansion must be OFF.")
+    if bool(getattr(campaign_create.network_settings, "target_partner_search_network", False)):
+        raise ValueError("Safety check failed: Search Partners must be OFF.")
+    if bool(getattr(campaign_create.network_settings, "target_content_network", False)):
+        raise ValueError("Safety check failed: Display Network must be OFF.")
 
 
 def campaign_builder_request_audit(client, customer_id, payload):
@@ -1235,6 +1421,9 @@ def campaign_builder_request_audit(client, customer_id, payload):
     ad_group_count = 0
     keyword_count = 0
     exemption_key_count = 0
+    sitelink_assets = 0
+    callout_assets = 0
+    call_assets = 0
     for operation in operations:
         try:
             if str(operation.ad_group_operation.create.resource_name):
@@ -1248,6 +1437,16 @@ def campaign_builder_request_audit(client, customer_id, payload):
             exemption_key_count += len(criterion_operation.exempt_policy_violation_keys)
         except Exception:
             pass
+        try:
+            asset_create = operation.asset_operation.create
+            if str(asset_create.sitelink_asset.link_text or ""):
+                sitelink_assets += 1
+            if str(asset_create.callout_asset.callout_text or ""):
+                callout_assets += 1
+            if str(asset_create.call_asset.phone_number or ""):
+                call_assets += 1
+        except Exception:
+            pass
 
     return {
         "build": CAMPAIGN_BUILDER_BUILD,
@@ -1258,6 +1457,10 @@ def campaign_builder_request_audit(client, customer_id, payload):
         "operations": len(operations),
         "ad_groups": ad_group_count,
         "ad_group_keywords_including_negatives": keyword_count,
+        "sitelink_assets": sitelink_assets,
+        "callout_assets": callout_assets,
+        "call_assets": call_assets,
+        "positive_geo_target_type": str(payload.get("positive_geo_target_type", "PRESENCE")),
         "approved_policy_exemption_keys": exemption_key_count,
     }
 
@@ -7448,6 +7651,22 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 key="campaign_builder_location_multi",
             )
 
+            builder_geo_mode_label = st.selectbox(
+                "Location targeting mode",
+                [
+                    "Presence — people in / regularly in target location (Recommended)",
+                    "Presence or interest — broader reach",
+                ],
+                index=0,
+                key="campaign_builder_geo_mode_v18",
+                help="For a Hyderabad-only home-care service, Presence prevents most out-of-area interest traffic.",
+            )
+            builder_positive_geo_type = (
+                "PRESENCE"
+                if builder_geo_mode_label.startswith("Presence —")
+                else "PRESENCE_OR_INTEREST"
+            )
+
         with builder_col2:
             builder_languages = st.multiselect(
                 "Languages",
@@ -7480,9 +7699,9 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         campaign_builder_service_url_defaults = {
             "Elderly Care": "https://hareekrishna.com/elderly-care",
             "Patient Care": "https://hareekrishna.com/patient-care",
-            "Nursing Care": "https://hareekrishna.com/",
+            "Nursing Care": "https://hareekrishna.com/nursing-care",
             "Baby Care": "https://hareekrishna.com/baby-care",
-            "Caretaker": "https://hareekrishna.com/caretakers",
+            "Caretaker": "https://hareekrishna.com/caretaker",
             "Domestic Help / Maid": "https://hareekrishna.com/domestic-help",
         }
 
@@ -7510,6 +7729,172 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                         help=f"Landing page used only for the {service_name} ad group.",
                     ).strip()
 
+        # ==================================================
+        # V18 — CAMPAIGN ASSETS + LIVE CALL TRACKING READINESS
+        # ==================================================
+        st.markdown("### 📞 Call & Ad Assets")
+        st.caption(
+            "Structured Snippets are intentionally removed. V19 creates Sitelinks, Callouts and a Call Asset in the same atomic PAUSED campaign request."
+        )
+
+        live_check_col, live_status_col = st.columns([1, 2])
+        with live_check_col:
+            refresh_builder_live_checks = st.button(
+                "🔄 Refresh Live Tracking Check",
+                key="campaign_builder_refresh_live_tracking_v18",
+                width="stretch",
+            )
+        with live_status_col:
+            st.caption(
+                "Reads your live conversion actions/call assets only. It does not change Google Ads."
+            )
+
+        if refresh_builder_live_checks:
+            try:
+                with st.spinner("Checking live phone-call conversion tracking..."):
+                    live_tracking = ads_ai_fetch_conversion_intelligence(
+                        ga_service=ga_service,
+                        serving_customer_id=str(customer_id),
+                        date_filter_clause=date_filter_clause,
+                        date_option=date_option,
+                        today_value=today,
+                        selected_campaign="All Campaigns",
+                        custom_start=None,
+                        custom_end=None,
+                    )
+                st.session_state["campaign_builder_live_tracking_v18"] = live_tracking
+                st.session_state["campaign_builder_live_tracking_checked_v18"] = True
+
+                active_calls = [
+                    row for row in live_tracking.get("conversion_actions", [])
+                    if row.get("Is Call Action")
+                    and row.get("Status") == "ENABLED"
+                    and row.get("Primary For Goal")
+                ]
+                preferred = sorted(
+                    active_calls,
+                    key=lambda row: (
+                        int(row.get("Call Duration Threshold Seconds") or 0) >= 60,
+                        row.get("Name") == "Calls from ads",
+                    ),
+                    reverse=True,
+                )
+                if preferred:
+                    st.session_state["campaign_builder_call_conversion_resource_v18"] = preferred[0].get("Resource", "")
+                    st.session_state["campaign_builder_call_conversion_name_v18"] = preferred[0].get("Name", "")
+                    st.session_state["campaign_builder_call_conversion_threshold_v18"] = int(preferred[0].get("Call Duration Threshold Seconds") or 0)
+
+                if not str(st.session_state.get("campaign_builder_call_phone_v18", "")).strip():
+                    live_call_assets = [
+                        row for row in live_tracking.get("call_assets", [])
+                        if str(row.get("Phone", "")).strip()
+                    ]
+                    if live_call_assets:
+                        st.session_state["campaign_builder_call_phone_v18"] = str(live_call_assets[0].get("Phone", "")).strip()
+                st.success("Live tracking check refreshed.")
+            except Exception as live_check_error:
+                st.session_state["campaign_builder_live_tracking_checked_v18"] = True
+                st.session_state["campaign_builder_live_tracking_error_v18"] = str(live_check_error)
+                st.error(f"Live tracking check failed: {live_check_error}")
+
+        builder_live_tracking = st.session_state.get("campaign_builder_live_tracking_v18", {}) or {}
+        detected_call_action_resource = str(
+            st.session_state.get("campaign_builder_call_conversion_resource_v18", "") or ""
+        )
+        detected_call_action_name = str(
+            st.session_state.get("campaign_builder_call_conversion_name_v18", "") or ""
+        )
+        detected_call_threshold = int(
+            st.session_state.get("campaign_builder_call_conversion_threshold_v18", 0) or 0
+        )
+        if detected_call_action_resource:
+            st.success(
+                f"Call conversion detected: {detected_call_action_name or 'Primary call action'} • threshold {detected_call_threshold}s"
+            )
+        else:
+            st.info("Click Refresh Live Tracking Check before final creation so V19 can verify the Primary phone-call conversion action.")
+
+        call_col1, call_col2, call_col3 = st.columns([1, 2, 1])
+        with call_col1:
+            builder_call_asset_enabled = st.checkbox(
+                "Create Call Asset",
+                value=True,
+                key="campaign_builder_call_asset_enabled_v18",
+            )
+        with call_col2:
+            builder_call_phone = st.text_input(
+                "Business phone number",
+                key="campaign_builder_call_phone_v18",
+                placeholder="Enter the same business number used for Google Ads calls",
+            ).strip()
+        with call_col3:
+            builder_call_country = st.text_input(
+                "Country code",
+                value="IN",
+                max_chars=2,
+                key="campaign_builder_call_country_v18",
+            ).strip().upper() or "IN"
+
+        st.markdown("#### 🔗 Sitelinks — 4 to 6 recommended")
+        default_sitelinks = pd.DataFrame([
+            {"Link Text": "Patient Care", "Description 1": "Patient care at home", "Description 2": "Trained attendants available", "Final URL": "https://hareekrishna.com/patient-care"},
+            {"Link Text": "Nursing Care", "Description 1": "Home nursing support", "Description 2": "Skilled nurses for home", "Final URL": "https://hareekrishna.com/nursing-care"},
+            {"Link Text": "Elderly Care", "Description 1": "Support for senior citizens", "Description 2": "Care at home in Hyderabad", "Final URL": "https://hareekrishna.com/elderly-care"},
+            {"Link Text": "Caretaker", "Description 1": "Male and female caretakers", "Description 2": "Home support when needed", "Final URL": "https://hareekrishna.com/caretaker"},
+        ])
+        if "campaign_builder_sitelinks_v18" not in st.session_state:
+            st.session_state["campaign_builder_sitelinks_v18"] = default_sitelinks
+        builder_sitelink_df = st.data_editor(
+            st.session_state["campaign_builder_sitelinks_v18"],
+            key="campaign_builder_sitelinks_editor_v18",
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Link Text": st.column_config.TextColumn(max_chars=25),
+                "Description 1": st.column_config.TextColumn(max_chars=35),
+                "Description 2": st.column_config.TextColumn(max_chars=35),
+                "Final URL": st.column_config.LinkColumn(),
+            },
+        )
+
+        builder_sitelinks = []
+        for _, row in builder_sitelink_df.iterrows():
+            link_text = str(row.get("Link Text", "") or "").strip()
+            final_url = str(row.get("Final URL", "") or "").strip()
+            if not link_text and not final_url:
+                continue
+            builder_sitelinks.append({
+                "link_text": campaign_builder_clip_text(link_text, 25),
+                "description1": campaign_builder_clip_text(str(row.get("Description 1", "") or "").strip(), 35),
+                "description2": campaign_builder_clip_text(str(row.get("Description 2", "") or "").strip(), 35),
+                "final_url": final_url,
+            })
+
+        st.markdown("#### 📣 Callouts — 6 to 10 recommended")
+        default_callouts = "\n".join([
+            "24/7 Support",
+            "Trained Caregivers",
+            "Home Care Hyderabad",
+            "Male & Female Staff",
+            "Quick Replacement",
+            "Immediate Assistance",
+        ])
+        builder_callouts_text = st.text_area(
+            "One callout per line (max 25 characters)",
+            value=default_callouts,
+            height=150,
+            key="campaign_builder_callouts_v18",
+        )
+        builder_callouts = []
+        seen_callouts = set()
+        for line in builder_callouts_text.splitlines():
+            clean = campaign_builder_clip_text(line.strip(), 25)
+            if clean and clean.casefold() not in seen_callouts:
+                seen_callouts.add(clean.casefold())
+                builder_callouts.append(clean)
+        builder_callouts = builder_callouts[:10]
+
         st.info(
             "Safety: AI only creates an editable draft. Validate Only makes no Google Ads changes. "
             "Creation is atomic, partial failure is OFF, and the campaign is created as PAUSED."
@@ -7530,6 +7915,20 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 builder_input_errors.append(
                     f"Enter a valid Final URL for {service_name} starting with http:// or https://."
                 )
+        for sitelink in builder_sitelinks:
+            if not sitelink.get("link_text"):
+                builder_input_errors.append("Every sitelink needs Link Text.")
+                break
+            if not campaign_builder_valid_url(sitelink.get("final_url", "")):
+                builder_input_errors.append("Every sitelink needs a valid Final URL.")
+                break
+            d1 = bool(sitelink.get("description1"))
+            d2 = bool(sitelink.get("description2"))
+            if d1 != d2:
+                builder_input_errors.append("Sitelink Description 1 and Description 2 must be supplied together.")
+                break
+        if builder_call_asset_enabled and not builder_call_phone:
+            builder_input_errors.append("Business phone number is required when Create Call Asset is enabled.")
 
         for builder_error in builder_input_errors:
             st.error(builder_error)
@@ -7567,10 +7966,16 @@ REQUIREMENTS FOR EACH SELECTED SERVICE:
 - 12 to 20 high-intent positive keywords.
 - Prefer PHRASE and EXACT. Use BROAD only when clearly justified.
 - Do not use informational, job, course, salary, PDF, meaning or definition intent as positive keywords.
+- Create 10 to 15 clearly irrelevant negative keywords per ad group (jobs, salary, courses, training, definitions, free when inappropriate).
 - Negative keywords must be clearly irrelevant only.
+- Never pad the list just to reach 10 negatives. If fewer than 10 are safely irrelevant, return fewer and let the pre-launch safety check fail for manual review.
 - Never make an offered service, own brand, or a generic home-care term negative just because it overlaps another ad group.
-- Create 10 to 15 unique RSA headlines, each <= 30 characters.
-- Create 3 to 4 unique RSA descriptions, each <= 90 characters.
+- Create 12 to 15 unique RSA headlines, each <= 30 characters.
+- CRITICAL KEYWORD↔HEADLINE RULE: every positive keyword must have at least one RSA headline that directly or near-directly reflects the same service/search intent.
+- For the first 8 core high-intent keywords, strongly prefer an exact or very close headline phrase when the 30-character limit allows it.
+- Use roughly 8 to 10 keyword-aligned headlines and the remaining headlines for trust, availability, local intent, and call-to-action.
+- Never force unrelated words into a headline just to satisfy coverage. Keep the ad group tightly themed instead.
+- Create exactly 4 unique RSA descriptions, each <= 90 characters.
 - Avoid unverifiable claims (#1, guaranteed, cheapest, best in India).
 - Use practical call/lead intent.
 - path1 and path2: lowercase URL path words, <= 15 characters each.
@@ -8248,6 +8653,15 @@ JSON SCHEMA:
                     ],
                     "bidding_strategy": builder_bidding,
                     "manual_cpc_bid": float(builder_manual_cpc),
+                    "positive_geo_target_type": builder_positive_geo_type,
+                    "sitelinks": builder_sitelinks,
+                    "callouts": builder_callouts,
+                    "call_asset": {
+                        "enabled": bool(builder_call_asset_enabled),
+                        "phone_number": builder_call_phone,
+                        "country_code": builder_call_country,
+                        "conversion_action_resource": detected_call_action_resource,
+                    },
                     "ad_groups": edited_groups,
                 }
 
@@ -8277,8 +8691,12 @@ JSON SCHEMA:
                     ["Daily Budget", f"₹{builder_daily_budget:,.2f}"],
                     ["Budget Type", "Dedicated / Non-shared"],
                     ["Location", builder_location],
+                    ["Location Mode", builder_positive_geo_type],
                     ["Languages", ", ".join(builder_languages)],
                     ["Bidding", builder_bidding],
+                    ["Call Asset", builder_call_phone if builder_call_asset_enabled else "OFF"],
+                    ["Sitelinks", len(builder_sitelinks)],
+                    ["Callouts", len(builder_callouts)],
                     ["Ad Groups", len(edited_groups)],
                     ["Total Selected Keywords", sum(len(g["keywords"]) for g in edited_groups)],
                     [
@@ -8307,6 +8725,49 @@ JSON SCHEMA:
                     ]
                 )
                 st.dataframe(ad_group_summary, hide_index=True, width="stretch")
+
+                # ==================================================
+                # V20 — KEYWORD ↔ HEADLINE COVERAGE
+                # ==================================================
+                keyword_headline_rows = []
+                keyword_headline_group_summary = []
+                for group_row in edited_groups:
+                    rows, matched_count, total_count, coverage_pct = (
+                        campaign_builder_keyword_headline_coverage(group_row)
+                    )
+                    keyword_headline_rows.extend(rows)
+                    keyword_headline_group_summary.append({
+                        "Service": group_row.get("service", "Service"),
+                        "Matched": matched_count,
+                        "Keywords": total_count,
+                        "Coverage %": round(coverage_pct),
+                    })
+
+                keyword_headline_coverage_ok = bool(keyword_headline_rows) and all(
+                    row.get("Pass", False) for row in keyword_headline_rows
+                )
+
+                with st.expander("🔗 Keyword ↔ Headline Match — 100% Required", expanded=not keyword_headline_coverage_ok):
+                    st.caption(
+                        "Every manually approved positive keyword must map to at least one closely matching RSA headline. "
+                        "Near-direct matching is allowed when Google's 30-character headline limit prevents the full keyword phrase."
+                    )
+                    if keyword_headline_group_summary:
+                        st.dataframe(
+                            pd.DataFrame(keyword_headline_group_summary),
+                            hide_index=True,
+                            width="stretch",
+                        )
+                    if keyword_headline_rows:
+                        display_match_df = pd.DataFrame(keyword_headline_rows).drop(columns=["Pass"], errors="ignore")
+                        st.dataframe(display_match_df, hide_index=True, width="stretch")
+                    if keyword_headline_coverage_ok:
+                        st.success("100% approved keyword ↔ headline coverage passed.")
+                    else:
+                        st.warning(
+                            "One or more approved keywords do not have a close headline match. "
+                            "Add/rewrite headlines or untick the weak keyword before Google validation."
+                        )
 
                 builder_validation_errors = []
                 if not builder_core_payload["campaign_name"]:
@@ -8342,8 +8803,100 @@ JSON SCHEMA:
                             f"{label}: RSA requires at least 2 descriptions."
                         )
 
+                for sitelink in builder_sitelinks:
+                    if not sitelink.get("link_text"):
+                        builder_validation_errors.append("Sitelink Link Text cannot be empty.")
+                    if not campaign_builder_valid_url(sitelink.get("final_url", "")):
+                        builder_validation_errors.append(
+                            f"Sitelink '{sitelink.get('link_text') or 'Untitled'}': Final URL is invalid."
+                        )
+                if builder_call_asset_enabled and not builder_call_phone:
+                    builder_validation_errors.append("Call Asset phone number is required.")
+
                 for builder_error in builder_validation_errors:
                     st.error(builder_error)
+
+                # ==================================================
+                # V20 — STRONG PRE-LAUNCH + KEYWORD/HEADLINE MATCH SAFETY CHECK
+                # ==================================================
+                st.subheader("🛡️ Pre-Launch Safety Check")
+                st.caption(
+                    "These checks reduce avoidable setup mistakes; they cannot guarantee campaign results. Create stays locked until every required check passes and Google validation also passes."
+                )
+                st.info(
+                    "V20 quality gate: 8+ manually approved keywords + 10+ safe negatives + "
+                    "12+ RSA headlines + 4 descriptions per ad group, 100% approved keyword↔headline coverage, "
+                    "plus 4+ sitelinks and 6+ callouts."
+                )
+
+                live_primary_call_ok = bool(
+                    detected_call_action_resource
+                    and detected_call_threshold >= 60
+                )
+                call_asset_ready = bool(
+                    builder_call_asset_enabled
+                    and builder_call_phone
+                    and detected_call_action_resource
+                )
+                presence_ok = builder_positive_geo_type == "PRESENCE"
+                keywords_ok = bool(edited_groups) and all(
+                    len(g.get("keywords", [])) >= 8 for g in edited_groups
+                )
+                negatives_ok = bool(edited_groups) and all(
+                    len(g.get("negative_keywords", [])) >= 10 for g in edited_groups
+                )
+                rsa_ok = bool(edited_groups) and all(
+                    len(g.get("headlines", [])) >= 12
+                    and len(g.get("descriptions", [])) >= 4
+                    for g in edited_groups
+                )
+                urls_ok = bool(edited_groups) and all(
+                    campaign_builder_valid_url(g.get("final_url", ""))
+                    and re.sub(r"/+$", "", str(g.get("final_url", "")).strip()).casefold()
+                    not in {"https://hareekrishna.com", "http://hareekrishna.com"}
+                    for g in edited_groups
+                )
+                sitelinks_ok = len(builder_sitelinks) >= 4 and all(
+                    campaign_builder_valid_url(s.get("final_url", ""))
+                    and bool(s.get("link_text"))
+                    for s in builder_sitelinks
+                )
+                callouts_ok = len(builder_callouts) >= 6
+                paused_search_only_ok = True  # Enforced again inside campaign_builder_assert_operations().
+
+                prelaunch_checks = [
+                    ("Primary 60s+ phone-call conversion active", live_primary_call_ok, f"{detected_call_action_name or 'Not detected'} • {detected_call_threshold}s" if detected_call_action_resource else "Run Refresh Live Tracking Check"),
+                    ("Call Asset + business phone ready", call_asset_ready, builder_call_phone or "Phone missing"),
+                    ("Location targeting = PRESENCE", presence_ok, builder_positive_geo_type),
+                    ("At least 8 approved keywords per ad group", keywords_ok, ", ".join(f"{g['service']}: {len(g.get('keywords', []))}" for g in edited_groups)),
+                    ("At least 10 safe irrelevant negatives per ad group", negatives_ok, ", ".join(f"{g['service']}: {len(g.get('negative_keywords', []))}" for g in edited_groups)),
+                    ("RSA completeness: 12+ headlines & 4 descriptions", rsa_ok, ", ".join(f"{g['service']}: {len(g.get('headlines', []))}H/{len(g.get('descriptions', []))}D" for g in edited_groups)),
+                    ("100% approved keyword ↔ headline match", keyword_headline_coverage_ok, ", ".join(f"{item['Service']}: {item['Coverage %']}%" for item in keyword_headline_group_summary) if keyword_headline_group_summary else "No approved keywords"),
+                    ("Service-specific Final URLs", urls_ok, "No homepage fallback" if urls_ok else "Review Final URLs"),
+                    ("4+ Sitelinks", sitelinks_ok, f"{len(builder_sitelinks)} configured"),
+                    ("6+ Callouts", callouts_ok, f"{len(builder_callouts)} configured"),
+                    ("PAUSED + Google Search only", paused_search_only_ok, "Hard-coded safety rule"),
+                ]
+                prelaunch_pass_count = sum(1 for _, ok, _ in prelaunch_checks if ok)
+                prelaunch_all_pass = prelaunch_pass_count == len(prelaunch_checks)
+
+                check_df = pd.DataFrame([
+                    {
+                        "Status": "✅ PASS" if ok else "❌ FIX",
+                        "Check": label,
+                        "Detail": detail,
+                    }
+                    for label, ok, detail in prelaunch_checks
+                ])
+                score_cols = st.columns([1, 3])
+                score_cols[0].metric("Pre-Launch Score", f"{prelaunch_pass_count}/{len(prelaunch_checks)}")
+                with score_cols[1]:
+                    if prelaunch_all_pass:
+                        st.success("All required pre-launch checks passed. Run Google Validate next.")
+                    else:
+                        st.warning("Fix every ❌ item before final campaign creation is unlocked.")
+                st.dataframe(check_df, hide_index=True, width="stretch")
+                st.caption("Image assets and Business Profile location assets remain recommended, but they are non-blocking in V20 because this atomic builder does not upload/link them yet.")
 
                 audit_col1, audit_col2 = st.columns([1, 3])
                 with audit_col1:
@@ -8647,6 +9200,10 @@ JSON SCHEMA:
                     st.caption(
                         "Run Validate first. Create stays locked until validation passes."
                     )
+                if not prelaunch_all_pass:
+                    st.warning(
+                        "Create is also locked by the Pre-Launch Safety Check. Fix every ❌ item above."
+                    )
 
                 builder_confirm_create = st.checkbox(
                     "I confirm: create this multi-ad-group campaign in Google Ads as PAUSED.",
@@ -8658,6 +9215,7 @@ JSON SCHEMA:
                     key="create_ai_campaign_builder_multi",
                     disabled=(
                         bool(builder_validation_errors)
+                        or not prelaunch_all_pass
                         or not validation_is_current
                         or not builder_confirm_create
                     ),
@@ -8712,6 +9270,8 @@ JSON SCHEMA:
                                 "campaign_result",
                                 "campaign_budget_result",
                                 "ad_group_result",
+                                "asset_result",
+                                "campaign_asset_result",
                             ):
                                 obj = getattr(result, attr, None)
                                 rn = getattr(obj, "resource_name", "") if obj else ""
