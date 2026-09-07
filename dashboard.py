@@ -2012,6 +2012,1032 @@ elif date_option == "Custom Date Range":
     else:
         st.warning("Please select both start and end dates.")
         st.stop()
+
+# ==================================================
+# ASK AI — LIVE CONVERSION TRACKING INTELLIGENCE
+# ==================================================
+
+def ads_ai_enum_name(value):
+    """Return a readable enum name for proto-plus enums without crashing."""
+    if value is None:
+        return ""
+
+    name = getattr(value, "name", None)
+    if name:
+        return str(name)
+
+    text = str(value)
+    return text.split(".")[-1] if text else ""
+
+
+def ads_ai_bool_text(value):
+    if value is True:
+        return "Yes"
+    if value is False:
+        return "No"
+    return "Unknown"
+
+
+def ads_ai_customer_id_from_resource(resource_name, fallback_customer_id):
+    """Extract the numeric customer id from customers/1234567890 safely."""
+    text = str(resource_name or "").strip()
+    match = re.search(r"customers/(\d+)", text)
+    if match:
+        return match.group(1)
+    return str(fallback_customer_id)
+
+
+def ads_ai_get_date_bounds(
+    date_option,
+    today_value,
+    custom_start=None,
+    custom_end=None,
+):
+    """Return inclusive Python date bounds for CallView filtering."""
+    if date_option == "Today":
+        return today_value, today_value
+
+    if date_option == "Last 7 Days":
+        return today_value - timedelta(days=6), today_value
+
+    if date_option == "Last 30 Days":
+        return today_value - timedelta(days=29), today_value
+
+    if date_option == "Last 90 Days":
+        return today_value - timedelta(days=89), today_value
+
+    if date_option == "Last 6 Months":
+        return today_value - timedelta(days=179), today_value
+
+    if date_option == "Last 1 Year":
+        return today_value - timedelta(days=364), today_value
+
+    if date_option == "Custom Date Range":
+        if custom_start is not None and custom_end is not None:
+            return custom_start, custom_end
+
+    return today_value - timedelta(days=29), today_value
+
+
+def ads_ai_safe_search(
+    ga_service,
+    customer_id,
+    query,
+    label,
+    errors,
+):
+    """Run one GAQL query and fail safely so one unsupported field does not break the app."""
+    try:
+        return list(
+            ga_service.search(
+                customer_id=str(customer_id),
+                query=query,
+            )
+        )
+    except Exception as exc:
+        errors.append(f"{label}: {exc}")
+        return []
+
+
+def ads_ai_call_asset_row(scope, row):
+    """Normalize call-asset fields from customer/campaign/ad-group asset resources."""
+    asset = row.asset
+    call_asset = asset.call_asset
+
+    campaign_name = ""
+    ad_group_name = ""
+    link_status = ""
+    primary_status = ""
+
+    if scope == "Campaign":
+        campaign_name = str(row.campaign.name or "")
+        link_status = ads_ai_enum_name(row.campaign_asset.status)
+        primary_status = ads_ai_enum_name(row.campaign_asset.primary_status)
+    elif scope == "Ad Group":
+        campaign_name = str(row.campaign.name or "")
+        ad_group_name = str(row.ad_group.name or "")
+        link_status = ads_ai_enum_name(row.ad_group_asset.status)
+        primary_status = ads_ai_enum_name(row.ad_group_asset.primary_status)
+    elif scope == "Account":
+        link_status = ads_ai_enum_name(row.customer_asset.status)
+        primary_status = ads_ai_enum_name(row.customer_asset.primary_status)
+
+    return {
+        "Scope": scope,
+        "Campaign": campaign_name,
+        "Ad Group": ad_group_name,
+        "Asset": str(asset.name or asset.resource_name or ""),
+        "Phone": str(call_asset.phone_number or ""),
+        "Country": str(call_asset.country_code or ""),
+        "Link Status": link_status,
+        "Primary Status": primary_status,
+        "Conversion Reporting": ads_ai_enum_name(
+            call_asset.call_conversion_reporting_state
+        ),
+        "Resource Conversion Action": str(
+            call_asset.call_conversion_action or ""
+        ),
+    }
+
+
+def ads_ai_fetch_conversion_intelligence(
+    ga_service,
+    serving_customer_id,
+    date_filter_clause,
+    date_option,
+    today_value,
+    selected_campaign,
+    custom_start=None,
+    custom_end=None,
+):
+    """
+    Fetch live Google Ads conversion settings, goal configuration, conversion
+    breakdown, call assets and CallView durations for Ask AI.
+
+    Every query is isolated. If Google Ads does not expose one resource/field for
+    the current account/API version, the rest of the dashboard still works.
+    """
+    errors = []
+
+    result = {
+        "tracking_setup": {},
+        "conversion_actions": [],
+        "customer_goals": [],
+        "campaign_goals": [],
+        "goal_configs": [],
+        "custom_goals": [],
+        "conversion_breakdown": [],
+        "call_assets": [],
+        "call_details": [],
+        "call_threshold_summary": [],
+        "errors": errors,
+    }
+
+    # --------------------------------------------------
+    # 1) Determine the effective conversion customer.
+    # --------------------------------------------------
+    tracking_query = """
+        SELECT
+            customer.id,
+            customer.descriptive_name,
+            customer.conversion_tracking_setting.google_ads_conversion_customer,
+            customer.conversion_tracking_setting.conversion_tracking_status,
+            customer.conversion_tracking_setting.conversion_tracking_id,
+            customer.conversion_tracking_setting.cross_account_conversion_tracking_id,
+            customer.call_reporting_setting.call_reporting_enabled,
+            customer.call_reporting_setting.call_conversion_reporting_enabled,
+            customer.call_reporting_setting.call_conversion_action
+        FROM customer
+    """
+
+    tracking_rows = ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        tracking_query,
+        "Conversion tracking account settings",
+        errors,
+    )
+
+    conversion_customer_id = str(serving_customer_id)
+
+    if tracking_rows:
+        row = tracking_rows[0]
+        tracking = row.customer.conversion_tracking_setting
+        call_reporting = row.customer.call_reporting_setting
+
+        conversion_customer_resource = str(
+            tracking.google_ads_conversion_customer or ""
+        )
+        conversion_customer_id = ads_ai_customer_id_from_resource(
+            conversion_customer_resource,
+            serving_customer_id,
+        )
+
+        result["tracking_setup"] = {
+            "Serving Customer ID": str(serving_customer_id),
+            "Serving Customer": str(row.customer.descriptive_name or ""),
+            "Conversion Customer ID": conversion_customer_id,
+            "Conversion Tracking Status": ads_ai_enum_name(
+                tracking.conversion_tracking_status
+            ),
+            "Conversion Tracking ID": str(
+                tracking.conversion_tracking_id or ""
+            ),
+            "Cross-account Conversion Tracking ID": str(
+                tracking.cross_account_conversion_tracking_id or ""
+            ),
+            "Call Reporting Enabled": bool(
+                call_reporting.call_reporting_enabled
+            ),
+            "Call Conversion Reporting Enabled": bool(
+                call_reporting.call_conversion_reporting_enabled
+            ),
+            "Account-level Call Conversion Action": str(
+                call_reporting.call_conversion_action or ""
+            ),
+        }
+
+    # --------------------------------------------------
+    # 2) Conversion action settings from conversion owner.
+    # --------------------------------------------------
+    conversion_action_query = """
+        SELECT
+            conversion_action.id,
+            conversion_action.resource_name,
+            conversion_action.name,
+            conversion_action.status,
+            conversion_action.type,
+            conversion_action.category,
+            conversion_action.origin,
+            conversion_action.counting_type,
+            conversion_action.primary_for_goal,
+            conversion_action.include_in_conversions_metric,
+            conversion_action.phone_call_duration_seconds,
+            conversion_action.click_through_lookback_window_days,
+            conversion_action.value_settings.default_value,
+            conversion_action.value_settings.default_currency_code
+        FROM conversion_action
+        ORDER BY conversion_action.name
+    """
+
+    action_rows = ads_ai_safe_search(
+        ga_service,
+        conversion_customer_id,
+        conversion_action_query,
+        "Conversion actions",
+        errors,
+    )
+
+    for row in action_rows:
+        action = row.conversion_action
+        action_status = ads_ai_enum_name(action.status)
+
+        if action_status == "REMOVED":
+            continue
+
+        action_type = ads_ai_enum_name(action.type)
+        is_call_action = action_type in {
+            "AD_CALL",
+            "WEBSITE_CALL",
+            "CLICK_TO_CALL",
+            "UPLOAD_CALLS",
+            "SMART_CAMPAIGN_AD_CLICKS_TO_CALL",
+            "SMART_CAMPAIGN_MAP_CLICKS_TO_CALL",
+            "SMART_CAMPAIGN_TRACKED_CALLS",
+        }
+
+        result["conversion_actions"].append({
+            "ID": str(action.id),
+            "Resource": str(action.resource_name or ""),
+            "Name": str(action.name or ""),
+            "Status": action_status,
+            "Type": action_type,
+            "Category": ads_ai_enum_name(action.category),
+            "Origin": ads_ai_enum_name(action.origin),
+            "Primary / Secondary": (
+                "Primary"
+                if bool(action.primary_for_goal)
+                else "Secondary"
+            ),
+            "Primary For Goal": bool(action.primary_for_goal),
+            "Include In Conversions Metric": bool(
+                action.include_in_conversions_metric
+            ),
+            "Counting": ads_ai_enum_name(action.counting_type),
+            "Call Duration Threshold Seconds": (
+                int(action.phone_call_duration_seconds or 0)
+                if is_call_action
+                else None
+            ),
+            "Click Lookback Days": int(
+                action.click_through_lookback_window_days or 0
+            ),
+            "Default Value": float(
+                action.value_settings.default_value or 0
+            ),
+            "Currency": str(
+                action.value_settings.default_currency_code or ""
+            ),
+            "Is Call Action": is_call_action,
+        })
+
+    # --------------------------------------------------
+    # 3) Customer-level conversion goals.
+    # --------------------------------------------------
+    customer_goal_query = """
+        SELECT
+            customer_conversion_goal.category,
+            customer_conversion_goal.origin,
+            customer_conversion_goal.biddable
+        FROM customer_conversion_goal
+    """
+
+    customer_goal_rows = ads_ai_safe_search(
+        ga_service,
+        conversion_customer_id,
+        customer_goal_query,
+        "Customer conversion goals",
+        errors,
+    )
+
+    for row in customer_goal_rows:
+        goal = row.customer_conversion_goal
+        result["customer_goals"].append({
+            "Category": ads_ai_enum_name(goal.category),
+            "Origin": ads_ai_enum_name(goal.origin),
+            "Biddable": bool(goal.biddable),
+        })
+
+    # --------------------------------------------------
+    # 4) Campaign-level goal config and biddability.
+    # --------------------------------------------------
+    campaign_goal_query = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            campaign_conversion_goal.category,
+            campaign_conversion_goal.origin,
+            campaign_conversion_goal.biddable
+        FROM campaign_conversion_goal
+    """
+
+    campaign_goal_rows = ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        campaign_goal_query,
+        "Campaign conversion goals",
+        errors,
+    )
+
+    for row in campaign_goal_rows:
+        if (
+            selected_campaign != "All Campaigns"
+            and str(row.campaign.name) != selected_campaign
+        ):
+            continue
+
+        goal = row.campaign_conversion_goal
+        result["campaign_goals"].append({
+            "Campaign ID": str(row.campaign.id),
+            "Campaign": str(row.campaign.name or ""),
+            "Category": ads_ai_enum_name(goal.category),
+            "Origin": ads_ai_enum_name(goal.origin),
+            "Biddable": bool(goal.biddable),
+        })
+
+    goal_config_query = """
+        SELECT
+            conversion_goal_campaign_config.campaign,
+            conversion_goal_campaign_config.custom_conversion_goal,
+            conversion_goal_campaign_config.goal_config_level,
+            campaign.id,
+            campaign.name,
+            custom_conversion_goal.name,
+            custom_conversion_goal.status,
+            custom_conversion_goal.conversion_actions
+        FROM conversion_goal_campaign_config
+    """
+
+    goal_config_rows = ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        goal_config_query,
+        "Campaign goal configuration",
+        errors,
+    )
+
+    for row in goal_config_rows:
+        if (
+            selected_campaign != "All Campaigns"
+            and str(row.campaign.name) != selected_campaign
+        ):
+            continue
+
+        config = row.conversion_goal_campaign_config
+        custom = row.custom_conversion_goal
+
+        result["goal_configs"].append({
+            "Campaign ID": str(row.campaign.id),
+            "Campaign": str(row.campaign.name or ""),
+            "Goal Config Level": ads_ai_enum_name(
+                config.goal_config_level
+            ),
+            "Custom Goal Resource": str(
+                config.custom_conversion_goal or ""
+            ),
+            "Custom Goal Name": str(custom.name or ""),
+            "Custom Goal Status": ads_ai_enum_name(custom.status),
+            "Custom Goal Conversion Actions": [
+                str(value)
+                for value in list(custom.conversion_actions or [])
+            ],
+        })
+
+    # Query all custom goals from the conversion customer too. This is useful if
+    # an attributed custom goal is not populated in the config row.
+    custom_goal_query = """
+        SELECT
+            custom_conversion_goal.id,
+            custom_conversion_goal.resource_name,
+            custom_conversion_goal.name,
+            custom_conversion_goal.status,
+            custom_conversion_goal.conversion_actions
+        FROM custom_conversion_goal
+    """
+
+    custom_goal_rows = ads_ai_safe_search(
+        ga_service,
+        conversion_customer_id,
+        custom_goal_query,
+        "Custom conversion goals",
+        errors,
+    )
+
+    for row in custom_goal_rows:
+        goal = row.custom_conversion_goal
+        result["custom_goals"].append({
+            "ID": str(goal.id),
+            "Resource": str(goal.resource_name or ""),
+            "Name": str(goal.name or ""),
+            "Status": ads_ai_enum_name(goal.status),
+            "Conversion Actions": [
+                str(value)
+                for value in list(goal.conversion_actions or [])
+            ],
+        })
+
+    # --------------------------------------------------
+    # 5) Conversion performance segmented by action.
+    # --------------------------------------------------
+    conversion_breakdown_query = f"""
+        SELECT
+            campaign.id,
+            campaign.name,
+            segments.conversion_action,
+            segments.conversion_action_name,
+            segments.conversion_action_category,
+            segments.external_conversion_source,
+            metrics.conversions,
+            metrics.all_conversions,
+            metrics.conversions_value,
+            metrics.all_conversions_value
+        FROM campaign
+        WHERE {date_filter_clause}
+          AND metrics.all_conversions > 0
+        ORDER BY metrics.all_conversions DESC
+    """
+
+    breakdown_rows = ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        conversion_breakdown_query,
+        "Conversions by conversion action",
+        errors,
+    )
+
+    for row in breakdown_rows:
+        if (
+            selected_campaign != "All Campaigns"
+            and str(row.campaign.name) != selected_campaign
+        ):
+            continue
+
+        result["conversion_breakdown"].append({
+            "Campaign ID": str(row.campaign.id),
+            "Campaign": str(row.campaign.name or ""),
+            "Conversion Action Resource": str(
+                row.segments.conversion_action or ""
+            ),
+            "Conversion Action": str(
+                row.segments.conversion_action_name or ""
+            ),
+            "Category": ads_ai_enum_name(
+                row.segments.conversion_action_category
+            ),
+            "External Source": ads_ai_enum_name(
+                row.segments.external_conversion_source
+            ),
+            "Conversions": round(float(row.metrics.conversions or 0), 2),
+            "All Conversions": round(
+                float(row.metrics.all_conversions or 0),
+                2,
+            ),
+            "Conversion Value": round(
+                float(row.metrics.conversions_value or 0),
+                2,
+            ),
+            "All Conversion Value": round(
+                float(row.metrics.all_conversions_value or 0),
+                2,
+            ),
+        })
+
+    # --------------------------------------------------
+    # 6) Call assets at account/campaign/ad-group scope.
+    # --------------------------------------------------
+    customer_call_asset_query = """
+        SELECT
+            customer_asset.status,
+            customer_asset.primary_status,
+            customer_asset.field_type,
+            asset.resource_name,
+            asset.name,
+            asset.call_asset.phone_number,
+            asset.call_asset.country_code,
+            asset.call_asset.call_conversion_reporting_state,
+            asset.call_asset.call_conversion_action
+        FROM customer_asset
+        WHERE customer_asset.field_type = CALL
+    """
+
+    for row in ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        customer_call_asset_query,
+        "Account-level call assets",
+        errors,
+    ):
+        result["call_assets"].append(
+            ads_ai_call_asset_row("Account", row)
+        )
+
+    campaign_call_asset_query = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            campaign_asset.status,
+            campaign_asset.primary_status,
+            campaign_asset.field_type,
+            asset.resource_name,
+            asset.name,
+            asset.call_asset.phone_number,
+            asset.call_asset.country_code,
+            asset.call_asset.call_conversion_reporting_state,
+            asset.call_asset.call_conversion_action
+        FROM campaign_asset
+        WHERE campaign_asset.field_type = CALL
+    """
+
+    for row in ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        campaign_call_asset_query,
+        "Campaign call assets",
+        errors,
+    ):
+        if (
+            selected_campaign != "All Campaigns"
+            and str(row.campaign.name) != selected_campaign
+        ):
+            continue
+        result["call_assets"].append(
+            ads_ai_call_asset_row("Campaign", row)
+        )
+
+    ad_group_call_asset_query = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            ad_group_asset.status,
+            ad_group_asset.primary_status,
+            ad_group_asset.field_type,
+            asset.resource_name,
+            asset.name,
+            asset.call_asset.phone_number,
+            asset.call_asset.country_code,
+            asset.call_asset.call_conversion_reporting_state,
+            asset.call_asset.call_conversion_action
+        FROM ad_group_asset
+        WHERE ad_group_asset.field_type = CALL
+    """
+
+    for row in ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        ad_group_call_asset_query,
+        "Ad-group call assets",
+        errors,
+    ):
+        if (
+            selected_campaign != "All Campaigns"
+            and str(row.campaign.name) != selected_campaign
+        ):
+            continue
+        result["call_assets"].append(
+            ads_ai_call_asset_row("Ad Group", row)
+        )
+
+    # --------------------------------------------------
+    # 7) CallView durations/status for exact call-threshold diagnosis.
+    # --------------------------------------------------
+    call_start, call_end = ads_ai_get_date_bounds(
+        date_option,
+        today_value,
+        custom_start,
+        custom_end,
+    )
+
+    call_view_base_select = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            call_view.resource_name,
+            call_view.start_call_date_time,
+            call_view.end_call_date_time,
+            call_view.call_duration_seconds,
+            call_view.call_status,
+            call_view.call_tracking_display_location,
+            call_view.type,
+            call_view.caller_country_code,
+            call_view.caller_area_code
+        FROM call_view
+    """
+
+    call_view_query = call_view_base_select + f"""
+        WHERE call_view.start_call_date_time >= '{call_start:%Y-%m-%d} 00:00:00'
+          AND call_view.start_call_date_time <= '{call_end:%Y-%m-%d} 23:59:59'
+        ORDER BY call_view.start_call_date_time DESC
+        LIMIT 1000
+    """
+
+    call_rows = ads_ai_safe_search(
+        ga_service,
+        serving_customer_id,
+        call_view_query,
+        "Call detail view",
+        errors,
+    )
+
+    # Some API versions/accounts are strict about date-time filtering on CallView.
+    # If that query failed, try a safe recent-call fallback and filter in Python.
+    if not call_rows and any(
+        err.startswith("Call detail view:")
+        for err in errors
+    ):
+        call_view_fallback_query = call_view_base_select + """
+            ORDER BY call_view.start_call_date_time DESC
+            LIMIT 1000
+        """
+
+        fallback_errors = []
+        fallback_rows = ads_ai_safe_search(
+            ga_service,
+            serving_customer_id,
+            call_view_fallback_query,
+            "Call detail fallback",
+            fallback_errors,
+        )
+
+        if fallback_rows:
+            call_rows = fallback_rows
+        else:
+            errors.extend(fallback_errors)
+
+    for row in call_rows:
+        campaign_name = str(row.campaign.name or "")
+        if (
+            selected_campaign != "All Campaigns"
+            and campaign_name != selected_campaign
+        ):
+            continue
+
+        start_text = str(row.call_view.start_call_date_time or "")
+        parsed_start = pd.to_datetime(start_text, errors="coerce")
+        if not pd.isna(parsed_start):
+            parsed_date = parsed_start.date()
+            if parsed_date < call_start or parsed_date > call_end:
+                continue
+
+        result["call_details"].append({
+            "Campaign": campaign_name,
+            "Ad Group": str(row.ad_group.name or ""),
+            "Start": start_text,
+            "Duration Seconds": int(
+                row.call_view.call_duration_seconds or 0
+            ),
+            "Status": ads_ai_enum_name(row.call_view.call_status),
+            "Display Location": ads_ai_enum_name(
+                row.call_view.call_tracking_display_location
+            ),
+            "Call Type": ads_ai_enum_name(row.call_view.type),
+            "Caller Country": str(
+                row.call_view.caller_country_code or ""
+            ),
+            "Caller Area": str(
+                row.call_view.caller_area_code or ""
+            ),
+        })
+
+    # --------------------------------------------------
+    # 8) Enrich actions with effective goal usage for selected campaign.
+    # --------------------------------------------------
+    customer_goal_map = {
+        (row["Category"], row["Origin"]): row["Biddable"]
+        for row in result["customer_goals"]
+    }
+
+    selected_config = None
+    if selected_campaign != "All Campaigns":
+        for row in result["goal_configs"]:
+            if row["Campaign"] == selected_campaign:
+                selected_config = row
+                break
+
+    campaign_goal_map = {
+        (row["Category"], row["Origin"]): row["Biddable"]
+        for row in result["campaign_goals"]
+        if (
+            selected_campaign == "All Campaigns"
+            or row["Campaign"] == selected_campaign
+        )
+    }
+
+    custom_action_resources = set()
+    if selected_config:
+        custom_action_resources.update(
+            selected_config.get("Custom Goal Conversion Actions", [])
+        )
+
+        custom_goal_resource = selected_config.get(
+            "Custom Goal Resource",
+            "",
+        )
+        if custom_goal_resource:
+            for custom_goal in result["custom_goals"]:
+                if custom_goal.get("Resource") == custom_goal_resource:
+                    custom_action_resources.update(
+                        custom_goal.get("Conversion Actions", [])
+                    )
+
+    for action in result["conversion_actions"]:
+        if selected_campaign == "All Campaigns":
+            action["Goal Source For Selected Campaign"] = "Varies by campaign"
+            action["Goal Biddable For Selected Campaign"] = None
+            action["Used For Bidding For Selected Campaign"] = None
+            continue
+
+        goal_level = (
+            selected_config.get("Goal Config Level", "")
+            if selected_config
+            else ""
+        )
+        has_custom_goal = bool(
+            selected_config
+            and selected_config.get("Custom Goal Resource")
+        )
+
+        action_key = (action["Category"], action["Origin"])
+
+        if has_custom_goal and action["Resource"] in custom_action_resources:
+            action["Goal Source For Selected Campaign"] = "Custom goal"
+            action["Goal Biddable For Selected Campaign"] = True
+            action["Used For Bidding For Selected Campaign"] = True
+        else:
+            if goal_level == "CAMPAIGN":
+                biddable = campaign_goal_map.get(action_key)
+                source = "Campaign goal"
+            else:
+                biddable = customer_goal_map.get(action_key)
+                source = "Customer goal"
+
+            action["Goal Source For Selected Campaign"] = source
+            action["Goal Biddable For Selected Campaign"] = biddable
+            action["Used For Bidding For Selected Campaign"] = (
+                bool(action["Primary For Goal"] and biddable)
+                if biddable is not None
+                else None
+            )
+
+    # --------------------------------------------------
+    # 9) Call-duration reconciliation summaries.
+    # --------------------------------------------------
+    call_actions = [
+        action
+        for action in result["conversion_actions"]
+        if action.get("Is Call Action")
+        and action.get("Status") == "ENABLED"
+    ]
+
+    for action in call_actions:
+        threshold = action.get("Call Duration Threshold Seconds")
+        if threshold is None:
+            continue
+
+        action_type = action.get("Type")
+        relevant_calls = result["call_details"]
+
+        if action_type == "AD_CALL":
+            relevant_calls = [
+                call
+                for call in relevant_calls
+                if call.get("Display Location") == "AD"
+            ]
+        elif action_type == "WEBSITE_CALL":
+            relevant_calls = [
+                call
+                for call in relevant_calls
+                if call.get("Display Location") == "LANDING_PAGE"
+            ]
+
+        received_calls = [
+            call
+            for call in relevant_calls
+            if call.get("Status") == "RECEIVED"
+        ]
+
+        result["call_threshold_summary"].append({
+            "Conversion Action": action.get("Name"),
+            "Type": action_type,
+            "Threshold Seconds": threshold,
+            "Matching CallView Rows": len(relevant_calls),
+            "Received Calls": len(received_calls),
+            "Received At/Above Threshold": sum(
+                1
+                for call in received_calls
+                if int(call.get("Duration Seconds") or 0) >= int(threshold)
+            ),
+            "Received Below Threshold": sum(
+                1
+                for call in received_calls
+                if int(call.get("Duration Seconds") or 0) < int(threshold)
+            ),
+            "Missed Calls": sum(
+                1
+                for call in relevant_calls
+                if call.get("Status") == "MISSED"
+            ),
+        })
+
+    return result
+
+
+def ads_ai_conversion_context_text(conversion_data, max_rows=25):
+    """Build a compact, truth-preserving context string for the OpenAI prompt."""
+    if not conversion_data:
+        return "Live conversion tracking data was not loaded."
+
+    parts = []
+
+    tracking_setup = conversion_data.get("tracking_setup", {})
+    if tracking_setup:
+        tracking_lines = [
+            f"{key}: {value}"
+            for key, value in tracking_setup.items()
+        ]
+        parts.append(
+            "CONVERSION TRACKING ACCOUNT SETUP:\n"
+            + "\n".join(tracking_lines)
+        )
+
+    actions = conversion_data.get("conversion_actions", [])
+    if actions:
+        call_actions = [
+            row for row in actions if row.get("Is Call Action")
+        ]
+        other_primary_actions = [
+            row
+            for row in actions
+            if not row.get("Is Call Action")
+            and row.get("Primary For Goal")
+        ]
+        action_rows = (call_actions + other_primary_actions)[:max_rows]
+        action_df = pd.DataFrame(action_rows)
+
+        action_columns = [
+            "Name",
+            "Status",
+            "Type",
+            "Category",
+            "Origin",
+            "Primary / Secondary",
+            "Counting",
+            "Call Duration Threshold Seconds",
+            "Goal Source For Selected Campaign",
+            "Goal Biddable For Selected Campaign",
+            "Used For Bidding For Selected Campaign",
+            "Resource",
+        ]
+        action_columns = [
+            col for col in action_columns if col in action_df.columns
+        ]
+
+        parts.append(
+            "CONVERSION ACTION SETTINGS (CALL ACTIONS + PRIMARY ACTIONS):\n"
+            + action_df[action_columns].to_string(index=False)
+        )
+    else:
+        parts.append("CONVERSION ACTION SETTINGS: unavailable")
+
+    goal_configs = conversion_data.get("goal_configs", [])
+    if goal_configs:
+        goal_df = pd.DataFrame(goal_configs).head(max_rows)
+        parts.append(
+            "CAMPAIGN GOAL CONFIGURATION:\n"
+            + goal_df.to_string(index=False)
+        )
+
+    campaign_goals = conversion_data.get("campaign_goals", [])
+    if campaign_goals:
+        campaign_goal_df = pd.DataFrame(campaign_goals)
+        phone_goal_df = campaign_goal_df[
+            campaign_goal_df["Category"].isin(
+                ["PHONE_CALL_LEAD", "CONTACT", "DEFAULT"]
+            )
+        ]
+        if phone_goal_df.empty:
+            phone_goal_df = campaign_goal_df
+        parts.append(
+            "SELECTED CAMPAIGN GOALS (MOST RELEVANT):\n"
+            + phone_goal_df.head(max_rows).to_string(index=False)
+        )
+
+    breakdown = conversion_data.get("conversion_breakdown", [])
+    if breakdown:
+        breakdown_df = pd.DataFrame(breakdown)
+        parts.append(
+            "CONVERSIONS BY CONVERSION ACTION FOR SELECTED PERIOD/SCOPE:\n"
+            + breakdown_df.head(max_rows).to_string(index=False)
+        )
+    else:
+        parts.append(
+            "CONVERSIONS BY CONVERSION ACTION: no rows returned for the selected period/scope."
+        )
+
+    call_assets = conversion_data.get("call_assets", [])
+    if call_assets:
+        call_asset_df = pd.DataFrame(call_assets)
+        parts.append(
+            "CALL ASSETS / CALL-CONVERSION ROUTING:\n"
+            + call_asset_df.head(max_rows).to_string(index=False)
+        )
+    else:
+        parts.append("CALL ASSETS: no call-asset rows returned.")
+
+    threshold_summary = conversion_data.get(
+        "call_threshold_summary",
+        [],
+    )
+    if threshold_summary:
+        threshold_df = pd.DataFrame(threshold_summary)
+        parts.append(
+            "CALL DURATION THRESHOLD RECONCILIATION:\n"
+            + threshold_df.head(max_rows).to_string(index=False)
+        )
+
+    call_details = conversion_data.get("call_details", [])
+    if call_details:
+        call_df = pd.DataFrame(call_details)
+        status_counts = call_df["Status"].value_counts().to_dict()
+        location_counts = call_df["Display Location"].value_counts().to_dict()
+        durations = call_df["Duration Seconds"].astype(int)
+
+        parts.append(
+            "CALLVIEW SUMMARY:\n"
+            f"Rows: {len(call_df)}\n"
+            f"Statuses: {status_counts}\n"
+            f"Display locations: {location_counts}\n"
+            f"Duration min/median/max seconds: "
+            f"{int(durations.min())}/{float(durations.median()):.1f}/{int(durations.max())}"
+        )
+
+        recent_columns = [
+            "Campaign",
+            "Ad Group",
+            "Start",
+            "Duration Seconds",
+            "Status",
+            "Display Location",
+            "Call Type",
+        ]
+        parts.append(
+            "RECENT CALL DETAILS (MAX 20):\n"
+            + call_df[recent_columns].head(20).to_string(index=False)
+        )
+    else:
+        parts.append(
+            "CALLVIEW DETAILS: unavailable or no tracked call rows returned for the selected period/scope."
+        )
+
+    errors = conversion_data.get("errors", [])
+    if errors:
+        # Keep only short technical labels in AI context. Full exceptions remain
+        # available to Streamlit through the local result object.
+        error_labels = []
+        for error in errors:
+            label = str(error).split(":", 1)[0].strip()
+            if label and label not in error_labels:
+                error_labels.append(label)
+        parts.append(
+            "UNAVAILABLE LIVE DATA SECTIONS:\n"
+            + ", ".join(error_labels)
+        )
+
+    return "\n\n".join(parts)
+
 # ==================================================
 # GOOGLE ADS CONNECTION
 # ==================================================
@@ -2026,7 +3052,18 @@ try:
         "use_proto_plus": True,
     }
 
-    customer_id = st.secrets["google_ads"]["customer_id"].replace("-", "")
+    # Optional MCC / manager login customer. Keep this blank if you use the
+    # client account directly. Hyphens are removed automatically.
+    login_customer_id = str(
+        st.secrets["google_ads"].get("login_customer_id", "")
+    ).replace("-", "").strip()
+
+    if login_customer_id:
+        credentials["login_customer_id"] = login_customer_id
+
+    customer_id = str(
+        st.secrets["google_ads"]["customer_id"]
+    ).replace("-", "").strip()
 
     client = GoogleAdsClient.load_from_dict(credentials)
 
@@ -7462,6 +8499,10 @@ JSON SCHEMA:
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
         st.caption(f"Scope: {analysis_scope_label}")
+        st.caption(
+            "For call/conversion questions, Ask AI now loads live conversion "
+            "actions, Primary/Secondary, goals, call assets and CallView duration data."
+        )
 
         # ==================================================
         # CHAT HISTORY
@@ -7655,6 +8696,31 @@ JSON SCHEMA:
                         "competitor names",
                         "కాంపిటిటర్",
                         "కాంపిటిటర్స్"
+                    ]
+                )
+
+                conversion_tracking_question = any(
+                    phrase in question_lower
+                    for phrase in [
+                        "conversion",
+                        "conversions",
+                        "call conversion",
+                        "phone call",
+                        "phone calls",
+                        "calls",
+                        "tracking",
+                        "primary",
+                        "secondary",
+                        "goal",
+                        "duration",
+                        "60 second",
+                        "60-second",
+                        "60 sec",
+                        "కాల్",
+                        "కాల్స్",
+                        "కన్వర్షన్",
+                        "కన్వర్షన్స్",
+                        "ట్రాకింగ్"
                     ]
                 )
 
@@ -7992,6 +9058,72 @@ JSON SCHEMA:
                         "No Before vs After comparison data is available."
                     )
 
+                # ==================================================
+                # LIVE CONVERSION / CALL TRACKING CONTEXT
+                # Loaded only for conversion/call/tracking questions.
+                # ==================================================
+
+                conversion_tracking_data = {}
+                conversion_tracking_context = (
+                    "Live conversion tracking settings were not loaded because "
+                    "the current question is not about conversions, calls, goals "
+                    "or tracking."
+                )
+
+                if conversion_tracking_question:
+                    custom_ai_start = (
+                        start_date
+                        if date_option == "Custom Date Range"
+                        else None
+                    )
+                    custom_ai_end = (
+                        end_date
+                        if date_option == "Custom Date Range"
+                        else None
+                    )
+
+                    with st.spinner(
+                        "Loading live conversion actions, goals and call details..."
+                    ):
+                        conversion_tracking_data = (
+                            ads_ai_fetch_conversion_intelligence(
+                                ga_service=ga_service,
+                                serving_customer_id=customer_id,
+                                date_filter_clause=date_filter_clause,
+                                date_option=date_option,
+                                today_value=today,
+                                selected_campaign=selected_campaign,
+                                custom_start=custom_ai_start,
+                                custom_end=custom_ai_end,
+                            )
+                        )
+
+                    conversion_tracking_context = (
+                        ads_ai_conversion_context_text(
+                            conversion_tracking_data
+                        )
+                    )
+
+                    st.caption(
+                        "Live tracking data loaded: "
+                        f"{len(conversion_tracking_data.get('conversion_actions', []))} "
+                        "conversion actions, "
+                        f"{len(conversion_tracking_data.get('conversion_breakdown', []))} "
+                        "conversion-performance rows, "
+                        f"{len(conversion_tracking_data.get('call_details', []))} "
+                        "call-detail rows."
+                    )
+
+                    optional_errors = conversion_tracking_data.get(
+                        "errors",
+                        [],
+                    )
+                    if optional_errors:
+                        st.caption(
+                            "Some optional Google Ads tracking sections were not "
+                            "available. Ask AI will use the live sections that did load."
+                        )
+
                 if (
                     negative_keyword_question
                     and not search_terms_available
@@ -8083,9 +9215,19 @@ JSON SCHEMA:
         - Answer only for that period.
         - Do not present campaign-vs-account performance as Before vs After.
         - Use BEFORE VS AFTER DATA only when actual comparison data is available.
-        - Calls are campaign/account-level in this dashboard, not search-term-level.
+        - The top KPI Calls metric is campaign/account-level, not search-term-level.
+        - LIVE CONVERSION / CALL TRACKING DATA may contain CallView rows with per-call duration/status. Use those only for call-tracking diagnosis, never to attribute a call to a Search Term.
         - Never claim that a specific Search Term generated or did not generate a phone call.
-        - If conversions are zero but Calls are greater than zero, recommend checking call-conversion tracking before labeling traffic as no-lead traffic.
+        - For conversion/call/tracking questions, use LIVE CONVERSION / CALL TRACKING DATA as the authoritative source for conversion-action settings and goal configuration.
+        - Primary/Secondary must come from conversion_action.primary_for_goal. Do not guess it from conversions alone.
+        - Campaign goal inclusion must come from goal configuration/biddability/custom-goal data. Do not infer it from campaign performance.
+        - Call duration threshold must come from the live conversion action. Do not assume 60 seconds unless the live data says 60.
+        - Counting must come from the live conversion action. MANY_PER_CLICK means Every; ONE_PER_CLICK means One.
+        - Do NOT say that every non-converted call was below the duration threshold unless CallView rows and conversion-action breakdown reconcile closely enough to support that conclusion.
+        - If call-level data is incomplete or unavailable, state exactly which evidence is missing instead of guessing.
+        - If a call asset uses USE_RESOURCE_LEVEL_CALL_CONVERSION_ACTION, use its resource conversion action. If it uses USE_ACCOUNT_LEVEL_CALL_CONVERSION_ACTION, use the account-level call conversion action. If reporting is DISABLED, flag it clearly.
+        - For WEBSITE_CALL tracking, API settings can confirm the conversion action but cannot by themselves prove that the website forwarding-number/tag implementation fires correctly. If evidence is insufficient, say a tag/website test is still required.
+        - If conversions are zero but Calls are greater than zero, check call-conversion tracking before labeling traffic as no-lead traffic.
 
         ADVERTISER SERVICES:
         - Home Care
@@ -8161,6 +9303,9 @@ JSON SCHEMA:
         BEFORE VS AFTER DATA:
         {before_after_context}
 
+        LIVE CONVERSION / CALL TRACKING DATA:
+        {conversion_tracking_context}
+
         SELECTED-SCOPE METRICS ({analysis_scope_label}):
         Impressions: {total_impressions}
         Clicks: {total_clicks}
@@ -8182,11 +9327,15 @@ JSON SCHEMA:
                     # OPENAI
                     # ==================================================
 
+                    conversion_tracking_context_hash = hashlib.sha256(
+                        conversion_tracking_context.encode("utf-8")
+                    ).hexdigest()
+
                     ask_ai_cache_key = (
-                        f"v5|{current_ai_period}|{selected_campaign}|{total_calls}|"
+                        f"v6|{current_ai_period}|{selected_campaign}|{total_calls}|"
                         f"{question}|{ask_campaign_context}|"
                         f"{search_terms_context}|{competitor_context}|"
-                        f"{before_after_context}"
+                        f"{before_after_context}|{conversion_tracking_context_hash}"
                     )
 
                     if (
