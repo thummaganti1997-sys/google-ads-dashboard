@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from datetime import date, datetime, time, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from google.ads.googleads.client import GoogleAdsClient
@@ -23,6 +23,144 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
 }
 
 CAMPAIGN_BUILDER_BUILD = "2026-09-01-final-multi-v12-keyword-decision"
+
+# ==================================================
+# CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
+# ==================================================
+
+CRM_FOLLOWUP_COLUMNS = [
+    "Lead ID",
+    "Customer",
+    "Phone",
+    "Ad Call Date",
+    "Ad Call Time",
+    "Original Call",
+    "Follow-up Status",
+    "Service",
+    "Notes",
+    "Updated At",
+]
+
+
+def crm_google_sheets_config():
+    """Return CRM Google Sheets configuration from Streamlit secrets, if present."""
+    try:
+        cfg = dict(st.secrets.get("crm_google_sheets", {}))
+    except Exception:
+        cfg = {}
+    try:
+        sa_info = dict(st.secrets.get("gcp_service_account", {}))
+    except Exception:
+        sa_info = {}
+
+    spreadsheet_id = str(cfg.get("spreadsheet_id", "")).strip()
+    sheet_name = str(cfg.get("sheet_name", "CRM Follow-up")).strip() or "CRM Follow-up"
+    return spreadsheet_id, sheet_name, sa_info
+
+
+def crm_google_sheets_client():
+    """Build an authorized Google Sheets HTTP session from service-account secrets."""
+    spreadsheet_id, sheet_name, sa_info = crm_google_sheets_config()
+    if not spreadsheet_id or not sa_info:
+        return None, spreadsheet_id, sheet_name, sa_info
+
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import AuthorizedSession
+    except ImportError as import_error:
+        raise RuntimeError(
+            "Google auth libraries are missing. Ensure the app requirements include google-auth."
+        ) from import_error
+
+    credentials = service_account.Credentials.from_service_account_info(
+        sa_info,
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    return AuthorizedSession(credentials), spreadsheet_id, sheet_name, sa_info
+
+
+def crm_google_sheets_ensure_tab(session, spreadsheet_id, sheet_name):
+    """Create the CRM sheet tab when it does not already exist."""
+    meta_url = (
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
+        "?fields=sheets.properties(sheetId,title)"
+    )
+    response = session.get(meta_url, timeout=30)
+    response.raise_for_status()
+    titles = {
+        str(item.get("properties", {}).get("title", ""))
+        for item in response.json().get("sheets", [])
+    }
+    if sheet_name in titles:
+        return
+
+    batch_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate"
+    response = session.post(
+        batch_url,
+        json={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]},
+        timeout=30,
+    )
+    response.raise_for_status()
+
+
+def crm_google_sheets_load_rows():
+    """Load CRM rows from Google Sheets. Raises on configuration/API errors."""
+    session, spreadsheet_id, sheet_name, _ = crm_google_sheets_client()
+    if session is None:
+        raise RuntimeError("Google Sheets CRM storage is not configured in Streamlit secrets.")
+
+    crm_google_sheets_ensure_tab(session, spreadsheet_id, sheet_name)
+    range_name = f"'{sheet_name}'!A1:J"
+    values_url = (
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/"
+        f"{quote(range_name, safe='')}"
+    )
+    response = session.get(values_url, timeout=30)
+    response.raise_for_status()
+    values = response.json().get("values", [])
+    if not values:
+        crm_google_sheets_write_rows([])
+        return []
+
+    header = [str(v).strip() for v in values[0]]
+    if header[:len(CRM_FOLLOWUP_COLUMNS)] != CRM_FOLLOWUP_COLUMNS:
+        raise RuntimeError(
+            "CRM sheet header does not match V17. Use a blank tab or restore a V15/V16 CSV through the dashboard."
+        )
+
+    rows = []
+    for raw in values[1:]:
+        padded = list(raw) + [""] * (len(CRM_FOLLOWUP_COLUMNS) - len(raw))
+        row = {col: str(padded[i]) for i, col in enumerate(CRM_FOLLOWUP_COLUMNS)}
+        if any(str(row.get(col, "")).strip() for col in CRM_FOLLOWUP_COLUMNS):
+            rows.append(row)
+    return rows
+
+
+def crm_google_sheets_write_rows(rows):
+    """Overwrite the CRM sheet with the canonical header and current CRM rows."""
+    session, spreadsheet_id, sheet_name, _ = crm_google_sheets_client()
+    if session is None:
+        raise RuntimeError("Google Sheets CRM storage is not configured in Streamlit secrets.")
+
+    crm_google_sheets_ensure_tab(session, spreadsheet_id, sheet_name)
+    range_name = f"'{sheet_name}'!A1:J"
+    values_url = (
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/"
+        f"{quote(range_name, safe='')}?valueInputOption=RAW"
+    )
+    body_values = [CRM_FOLLOWUP_COLUMNS]
+    for row in rows:
+        body_values.append([str(row.get(col, "")) for col in CRM_FOLLOWUP_COLUMNS])
+
+    response = session.put(
+        values_url,
+        json={"range": range_name, "majorDimension": "ROWS", "values": body_values},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
 
 CAMPAIGN_BUILDER_PROTECTED_NEGATIVE_PHRASES = (
     "hare krishna",
@@ -8608,7 +8746,7 @@ JSON SCHEMA:
                         )
 
         # ==================================================
-        # CRM CALL FOLLOW-UP (SEPARATE FROM GOOGLE ADS CONVERSIONS)
+        # CRM CALL FOLLOW-UP (V17: MULTI-SERVICE + GOOGLE SHEETS STORAGE)
         # ==================================================
 
         st.divider()
@@ -8621,15 +8759,71 @@ JSON SCHEMA:
         if "crm_followup_rows" not in st.session_state:
             st.session_state.crm_followup_rows = []
 
+        crm_sheet_id, crm_sheet_name, crm_sa_info = crm_google_sheets_config()
+        crm_storage_configured = bool(crm_sheet_id and crm_sa_info)
+
+        if crm_storage_configured and not st.session_state.get("crm_gsheet_loaded_v17", False):
+            try:
+                st.session_state.crm_followup_rows = crm_google_sheets_load_rows()
+                st.session_state.crm_gsheet_loaded_v17 = True
+                st.session_state.crm_gsheet_error_v17 = ""
+            except Exception as crm_load_error:
+                st.session_state.crm_gsheet_error_v17 = str(crm_load_error)
+
+        if crm_storage_configured and not st.session_state.get("crm_gsheet_error_v17", ""):
+            st.success(f"☁️ Permanent CRM storage connected: Google Sheets → {crm_sheet_name}")
+        elif crm_storage_configured:
+            st.error(
+                "Google Sheets CRM storage is configured but could not be opened. "
+                f"Details: {st.session_state.get('crm_gsheet_error_v17', 'Unknown error')}"
+            )
+        else:
+            st.warning(
+                "Permanent CRM storage is not configured yet. CRM works in this session, "
+                "but add the Google Sheets secrets shown below to keep data after redeploy/restart."
+            )
+
+        with st.expander("Google Sheets permanent storage setup", expanded=not crm_storage_configured):
+            crm_secrets_example = """[crm_google_sheets]
+spreadsheet_id = \"YOUR_GOOGLE_SHEET_ID\"
+sheet_name = \"CRM Follow-up\"
+
+[gcp_service_account]
+type = \"service_account\"
+project_id = \"YOUR_PROJECT_ID\"
+private_key_id = \"YOUR_PRIVATE_KEY_ID\"
+private_key = \"-----BEGIN PRIVATE KEY-----\\nYOUR_PRIVATE_KEY\\n-----END PRIVATE KEY-----\\n\"
+client_email = \"YOUR_SERVICE_ACCOUNT_EMAIL\"
+client_id = \"YOUR_CLIENT_ID\"
+auth_uri = \"https://accounts.google.com/o/oauth2/auth\"
+token_uri = \"https://oauth2.googleapis.com/token\"
+auth_provider_x509_cert_url = \"https://www.googleapis.com/oauth2/v1/certs\"
+client_x509_cert_url = \"YOUR_CLIENT_CERT_URL\""""
+            st.code(crm_secrets_example, language="toml")
+            if crm_sa_info.get("client_email"):
+                st.info(
+                    "Share the Google Sheet with this service-account email as Editor: "
+                    f"{crm_sa_info.get('client_email')}"
+                )
+            st.caption(
+                "V17 automatically creates the 'CRM Follow-up' tab if the spreadsheet is shared with the service account."
+            )
+            if crm_storage_configured and st.button("🔄 Refresh CRM from Google Sheets", key="crm_refresh_gsheet_v17"):
+                try:
+                    st.session_state.crm_followup_rows = crm_google_sheets_load_rows()
+                    st.session_state.crm_gsheet_loaded_v17 = True
+                    st.session_state.crm_gsheet_error_v17 = ""
+                    st.success("CRM refreshed from Google Sheets.")
+                    st.rerun()
+                except Exception as crm_refresh_error:
+                    st.error(f"Could not refresh CRM: {crm_refresh_error}")
+
         with st.expander("Add / update a callback lead", expanded=True):
             st.info(
                 "Choose a recent Google Ads call to auto-fill call date, time and Missed/Received status. "
                 "Customer phone/name still come from your own phone/CRM because CallView does not expose them."
             )
 
-            # --------------------------------------------------
-            # V16: Recent CallView selector for auto-fill
-            # --------------------------------------------------
             recent_crm_calls = []
             try:
                 crm_call_query = """
@@ -8699,7 +8893,6 @@ JSON SCHEMA:
                 default_call_time = datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0)
                 default_call_status = "Missed"
 
-            # Existing phone/name memory inside the current CRM session.
             existing_phone_to_name = {}
             for r in st.session_state.crm_followup_rows:
                 p = str(r.get("Phone", "")).strip()
@@ -8710,7 +8903,7 @@ JSON SCHEMA:
             crm_phone = st.text_input(
                 "Customer phone number",
                 placeholder="Enter the number from your phone/CRM",
-                key="crm_phone_lookup_v16",
+                key="crm_phone_lookup_v17",
             ).strip()
             remembered_name = existing_phone_to_name.get(crm_phone, "")
             if crm_phone and remembered_name:
@@ -8725,7 +8918,7 @@ JSON SCHEMA:
                     "Use a new Lead ID only for a genuinely new enquiry."
                 )
 
-            with st.form("crm_followup_form_v16", clear_on_submit=False):
+            with st.form("crm_followup_form_v17", clear_on_submit=False):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     crm_lead_id = st.text_input(
@@ -8767,8 +8960,8 @@ JSON SCHEMA:
                             "Customer Converted",
                         ],
                     )
-                    crm_service = st.selectbox(
-                        "Service",
+                    crm_services = st.multiselect(
+                        "Services",
                         [
                             "Elderly Care",
                             "Patient Care",
@@ -8778,7 +8971,15 @@ JSON SCHEMA:
                             "Domestic Help",
                             "Other",
                         ],
+                        default=["Elderly Care"],
+                        help="Select one or multiple services required by this customer.",
                     )
+                    crm_other_service = ""
+                    if "Other" in crm_services:
+                        crm_other_service = st.text_input(
+                            "Other service name",
+                            placeholder="Enter service name",
+                        ).strip()
                     crm_notes = st.text_area(
                         "Notes",
                         placeholder="Callback result / requirement / next action",
@@ -8796,8 +8997,17 @@ JSON SCHEMA:
                     st.error("Enter a Lead ID.")
                 elif not crm_phone:
                     st.error("Enter the customer phone number from your own phone/CRM.")
+                elif not crm_services:
+                    st.error("Select at least one service.")
+                elif "Other" in crm_services and not crm_other_service:
+                    st.error("Enter the Other service name.")
                 else:
                     now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+                    service_values = [s for s in crm_services if s != "Other"]
+                    if "Other" in crm_services and crm_other_service:
+                        service_values.append(crm_other_service)
+                    crm_service_text = " | ".join(service_values)
+
                     new_row = {
                         "Lead ID": crm_lead_id,
                         "Customer": crm_name,
@@ -8806,7 +9016,7 @@ JSON SCHEMA:
                         "Ad Call Time": crm_call_time.strftime("%H:%M:%S"),
                         "Original Call": crm_call_status,
                         "Follow-up Status": crm_followup_status,
-                        "Service": crm_service,
+                        "Service": crm_service_text,
                         "Notes": crm_notes,
                         "Updated At": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
                     }
@@ -8818,10 +9028,24 @@ JSON SCHEMA:
                     )
                     if existing_idx is None:
                         rows.append(new_row)
-                        st.success("CRM lead saved.")
+                        save_message = "CRM lead saved."
                     else:
                         rows[existing_idx] = new_row
-                        st.success("CRM lead updated.")
+                        save_message = "CRM lead updated."
+
+                    if crm_storage_configured:
+                        try:
+                            crm_google_sheets_write_rows(rows)
+                            st.session_state.crm_gsheet_loaded_v17 = True
+                            st.session_state.crm_gsheet_error_v17 = ""
+                            st.success(f"{save_message} Saved permanently to Google Sheets. ✅")
+                        except Exception as crm_write_error:
+                            st.session_state.crm_gsheet_error_v17 = str(crm_write_error)
+                            st.error(
+                                f"{save_message} It is in this session, but Google Sheets save failed: {crm_write_error}"
+                            )
+                    else:
+                        st.success(save_message)
 
         crm_rows = st.session_state.get("crm_followup_rows", [])
         if crm_rows:
@@ -8845,17 +9069,13 @@ JSON SCHEMA:
                     "Customer Converted",
                 ],
                 default=[],
-                key="crm_followup_status_filter",
+                key="crm_followup_status_filter_v17",
             )
             crm_view_df = crm_df.copy()
             if status_filter:
                 crm_view_df = crm_view_df[crm_view_df["Follow-up Status"].isin(status_filter)]
 
-            st.dataframe(
-                crm_view_df,
-                width="stretch",
-                hide_index=True,
-            )
+            st.dataframe(crm_view_df, width="stretch", hide_index=True)
 
             st.download_button(
                 "⬇️ Download CRM CSV",
@@ -8865,39 +9085,44 @@ JSON SCHEMA:
                 width="stretch",
             )
 
-            st.warning(
-                "Current CRM rows are stored in this Streamlit session only. "
-                "Download the CSV before a redeploy/restart if you want to keep them. "
-                "A later version can connect permanent storage such as Google Sheets/Database."
-            )
+            if crm_storage_configured and not st.session_state.get("crm_gsheet_error_v17", ""):
+                st.caption("CRM rows are stored permanently in Google Sheets and also cached in this app session.")
+            else:
+                st.warning(
+                    "CRM rows are currently cached in this Streamlit session. "
+                    "Configure Google Sheets permanent storage above, or download the CSV before redeploy/restart."
+                )
 
-            if st.button("🗑️ Clear CRM session data", key="crm_clear_session"):
+            if st.button("🧹 Clear local CRM cache", key="crm_clear_session_v17"):
                 st.session_state.crm_followup_rows = []
+                st.session_state.crm_gsheet_loaded_v17 = False
                 st.rerun()
         else:
-            st.caption("No CRM follow-up leads saved in this session yet.")
+            st.caption("No CRM follow-up leads saved yet.")
 
         with st.expander("Restore CRM rows from a previously downloaded CSV", expanded=False):
             crm_restore_file = st.file_uploader(
                 "Upload CRM CSV",
                 type=["csv"],
-                key="crm_restore_csv",
+                key="crm_restore_csv_v17",
             )
             if crm_restore_file is not None:
                 try:
                     restored_df = pd.read_csv(crm_restore_file, dtype=str).fillna("")
-                    required_cols = {
-                        "Lead ID", "Phone", "Ad Call Date", "Ad Call Time",
-                        "Original Call", "Follow-up Status", "Service", "Updated At"
-                    }
+                    required_cols = set(CRM_FOLLOWUP_COLUMNS)
                     if not required_cols.issubset(set(restored_df.columns)):
-                        st.error("This CSV does not look like a V15 CRM export.")
-                    elif st.button("Restore these CRM rows", key="crm_restore_button"):
-                        st.session_state.crm_followup_rows = restored_df.to_dict("records")
-                        st.success("CRM rows restored for this session.")
+                        st.error("This CSV does not look like a V15/V16/V17 CRM export.")
+                    elif st.button("Restore these CRM rows", key="crm_restore_button_v17"):
+                        restored_rows = restored_df[CRM_FOLLOWUP_COLUMNS].to_dict("records")
+                        st.session_state.crm_followup_rows = restored_rows
+                        if crm_storage_configured:
+                            crm_google_sheets_write_rows(restored_rows)
+                            st.success("CRM rows restored and saved permanently to Google Sheets.")
+                        else:
+                            st.success("CRM rows restored for this session.")
                         st.rerun()
                 except Exception as crm_restore_error:
-                    st.error(f"Could not read CRM CSV: {crm_restore_error}")
+                    st.error(f"Could not read/restore CRM CSV: {crm_restore_error}")
 
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
