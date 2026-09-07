@@ -22,7 +22,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-09-07-v21-3-groups-quality-ready"
+CAMPAIGN_BUILDER_BUILD = "2026-09-07-v22-correct-service-urls"
 
 # ==================================================
 # CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
@@ -7698,10 +7698,11 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
 
         # Separate landing page for every selected service / ad group.
         # This avoids sending Elderly Care and Patient Care traffic to the same page.
+        # V22 verified service URL defaults requested for the live site.
         campaign_builder_service_url_defaults = {
             "Elderly Care": "https://hareekrishna.com/elderly-care",
             "Patient Care + Bedridden Care": "https://hareekrishna.com/patient-care",
-            "Nursing Care": "https://hareekrishna.com/nursing-care",
+            "Nursing Care": "https://hareekrishna.com/nursing-services",
         }
 
         builder_service_urls = {}
@@ -7811,7 +7812,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 f"Call conversion detected: {detected_call_action_name or 'Primary call action'} • threshold {detected_call_threshold}s"
             )
         else:
-            st.info("Click Refresh Live Tracking Check before final creation so V19 can verify the Primary phone-call conversion action.")
+            st.info("Click Refresh Live Tracking Check before final creation so V22 can verify the Primary phone-call conversion action.")
 
         call_col1, call_col2, call_col3 = st.columns([1, 2, 1])
         with call_col1:
@@ -7838,15 +7839,15 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
         default_sitelinks = pd.DataFrame([
             {"Link Text": "Elderly Care", "Description 1": "Senior care at home", "Description 2": "Support across Hyderabad", "Final URL": "https://hareekrishna.com/elderly-care"},
             {"Link Text": "Patient Care", "Description 1": "Patient care at home", "Description 2": "Attendant support available", "Final URL": "https://hareekrishna.com/patient-care"},
-            {"Link Text": "Nursing Care", "Description 1": "Home nursing support", "Description 2": "Skilled nurses for home", "Final URL": "https://hareekrishna.com/nursing-care"},
-            {"Link Text": "Caretaker / Bedridden", "Description 1": "Caretaker support at home", "Description 2": "Help for bedridden patients", "Final URL": "https://hareekrishna.com/caretaker"},
+            {"Link Text": "Nursing Services", "Description 1": "Home nursing support", "Description 2": "Skilled nurses for home", "Final URL": "https://hareekrishna.com/nursing-services"},
+            {"Link Text": "Bedridden Care", "Description 1": "Bedridden care at home", "Description 2": "Patient support at home", "Final URL": "https://hareekrishna.com/bedridden-care"},
             {"Link Text": "Home Care Services", "Description 1": "Explore home care services", "Description 2": "Care options in Hyderabad", "Final URL": "https://hareekrishna.com/"},
         ])
-        if "campaign_builder_sitelinks_v18" not in st.session_state:
-            st.session_state["campaign_builder_sitelinks_v18"] = default_sitelinks
+        if "campaign_builder_sitelinks_v22" not in st.session_state:
+            st.session_state["campaign_builder_sitelinks_v22"] = default_sitelinks
         builder_sitelink_df = st.data_editor(
-            st.session_state["campaign_builder_sitelinks_v18"],
-            key="campaign_builder_sitelinks_editor_v18",
+            st.session_state["campaign_builder_sitelinks_v22"],
+            key="campaign_builder_sitelinks_editor_v22",
             num_rows="dynamic",
             hide_index=True,
             width="stretch",
