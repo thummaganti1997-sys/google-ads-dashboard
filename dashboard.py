@@ -8623,12 +8623,109 @@ JSON SCHEMA:
 
         with st.expander("Add / update a callback lead", expanded=True):
             st.info(
-                "Use this for missed or received ad calls that you follow up manually. "
-                "Because CallView does not expose a usable click ID/caller number for these calls, "
-                "CRM status is kept separate from Google Ads attribution."
+                "Choose a recent Google Ads call to auto-fill call date, time and Missed/Received status. "
+                "Customer phone/name still come from your own phone/CRM because CallView does not expose them."
             )
 
-            with st.form("crm_followup_form", clear_on_submit=True):
+            # --------------------------------------------------
+            # V16: Recent CallView selector for auto-fill
+            # --------------------------------------------------
+            recent_crm_calls = []
+            try:
+                crm_call_query = """
+                    SELECT
+                        campaign.name,
+                        call_view.start_call_date_time,
+                        call_view.call_duration_seconds,
+                        call_view.call_status
+                    FROM call_view
+                    ORDER BY call_view.start_call_date_time DESC
+                    LIMIT 50
+                """
+                crm_call_rows = list(
+                    ga_service.search(
+                        customer_id=str(customer_id),
+                        query=crm_call_query,
+                    )
+                )
+                for row in crm_call_rows:
+                    campaign_name = str(row.campaign.name or "")
+                    if selected_campaign != "All Campaigns" and campaign_name != selected_campaign:
+                        continue
+                    start_text = str(row.call_view.start_call_date_time or "")
+                    parsed = pd.to_datetime(start_text, errors="coerce")
+                    if pd.isna(parsed):
+                        continue
+                    status_raw = ads_ai_enum_name(row.call_view.call_status)
+                    status_label = "Received" if status_raw == "RECEIVED" else ("Missed" if status_raw == "MISSED" else "Unknown")
+                    recent_crm_calls.append({
+                        "Start": parsed,
+                        "Status": status_label,
+                        "Duration": int(row.call_view.call_duration_seconds or 0),
+                        "Campaign": campaign_name,
+                    })
+            except Exception as crm_call_error:
+                st.caption(f"Recent call auto-fill unavailable: {crm_call_error}")
+
+            call_options = ["Manual entry"]
+            call_lookup = {}
+            for idx, call in enumerate(recent_crm_calls):
+                key = (
+                    f"{call['Start'].strftime('%Y-%m-%d %H:%M:%S')} | "
+                    f"{call['Status']} | {call['Duration']} sec | {call['Campaign']}"
+                )
+                if key in call_lookup:
+                    key = f"{key} | #{idx+1}"
+                call_options.append(key)
+                call_lookup[key] = call
+
+            selected_call_key = st.selectbox(
+                "Select recent Google Ads call (auto-fill)",
+                call_options,
+                help="Selecting a call auto-fills the original ad call date, time and status.",
+            )
+            selected_call = call_lookup.get(selected_call_key)
+
+            if selected_call:
+                default_call_date = selected_call["Start"].date()
+                default_call_time = selected_call["Start"].time().replace(microsecond=0)
+                default_call_status = selected_call["Status"]
+                st.caption(
+                    f"Selected: {selected_call['Campaign']} • {selected_call['Status']} • "
+                    f"{selected_call['Duration']} sec"
+                )
+            else:
+                default_call_date = today
+                default_call_time = datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0)
+                default_call_status = "Missed"
+
+            # Existing phone/name memory inside the current CRM session.
+            existing_phone_to_name = {}
+            for r in st.session_state.crm_followup_rows:
+                p = str(r.get("Phone", "")).strip()
+                n = str(r.get("Customer", "")).strip()
+                if p and n:
+                    existing_phone_to_name[p] = n
+
+            crm_phone = st.text_input(
+                "Customer phone number",
+                placeholder="Enter the number from your phone/CRM",
+                key="crm_phone_lookup_v16",
+            ).strip()
+            remembered_name = existing_phone_to_name.get(crm_phone, "")
+            if crm_phone and remembered_name:
+                st.success(f"Existing customer found: {remembered_name}")
+            duplicate_rows = [
+                r for r in st.session_state.crm_followup_rows
+                if crm_phone and str(r.get("Phone", "")).strip() == crm_phone
+            ]
+            if duplicate_rows:
+                st.warning(
+                    f"This phone number already has {len(duplicate_rows)} CRM record(s). "
+                    "Use a new Lead ID only for a genuinely new enquiry."
+                )
+
+            with st.form("crm_followup_form_v16", clear_on_submit=False):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     crm_lead_id = st.text_input(
@@ -8636,28 +8733,27 @@ JSON SCHEMA:
                         value=f"HK-{datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%Y%m%d-%H%M%S')}",
                         help="Unique internal ID for this lead.",
                     ).strip()
-                    crm_phone = st.text_input(
-                        "Customer phone number",
-                        placeholder="Enter the number from your phone/CRM",
-                    ).strip()
                     crm_name = st.text_input(
                         "Customer name (optional)",
+                        value=remembered_name,
                         placeholder="Name",
                     ).strip()
 
                 with c2:
                     crm_call_date = st.date_input(
                         "Original ad call date",
-                        value=today,
+                        value=default_call_date,
                         max_value=today,
                     )
                     crm_call_time = st.time_input(
                         "Original ad call time",
-                        value=datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0),
+                        value=default_call_time,
                     )
+                    crm_status_options = ["Missed", "Received", "Unknown"]
                     crm_call_status = st.selectbox(
                         "Original call status",
-                        ["Missed", "Received", "Unknown"],
+                        crm_status_options,
+                        index=crm_status_options.index(default_call_status) if default_call_status in crm_status_options else 2,
                     )
 
                 with c3:
