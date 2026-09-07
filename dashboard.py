@@ -8608,210 +8608,200 @@ JSON SCHEMA:
                         )
 
         # ==================================================
-        # CRM OFFLINE QUALIFIED LEAD IMPORT
+        # CRM CALL FOLLOW-UP (SEPARATE FROM GOOGLE ADS CONVERSIONS)
         # ==================================================
 
         st.divider()
-        st.header("🧾 CRM Offline Qualified Lead Import")
+        st.header("📞 CRM Call Follow-up")
         st.caption(
-            "Uploads a callback/CRM outcome to Google Ads only when a valid "
-            "Google Ads click identifier (GCLID / GBRAID / WBRAID) is available. "
-            "A manual callback by itself is not enough for click-attributed offline conversion import."
+            "Track callback outcomes separately from Google Ads conversion reporting. "
+            "This section does not upload or change Google Ads conversions."
         )
 
-        with st.expander("Open CRM offline conversion uploader", expanded=False):
-            crm_action_name = "Qualified Lead - CRM"
+        if "crm_followup_rows" not in st.session_state:
+            st.session_state.crm_followup_rows = []
 
-            try:
-                crm_action = crm_find_conversion_action(
-                    ga_service=ga_service,
-                    customer_id=customer_id,
-                    action_name=crm_action_name,
-                )
-            except Exception as crm_lookup_error:
-                crm_action = None
-                st.error("Could not read the Qualified Lead - CRM conversion action.")
-                st.caption(f"Technical detail: {crm_lookup_error}")
+        with st.expander("Add / update a callback lead", expanded=True):
+            st.info(
+                "Use this for missed or received ad calls that you follow up manually. "
+                "Because CallView does not expose a usable click ID/caller number for these calls, "
+                "CRM status is kept separate from Google Ads attribution."
+            )
 
-            if crm_action is None:
-                st.warning(
-                    "Qualified Lead - CRM was not found in this Google Ads account. "
-                    "Create that offline conversion action first, then return here."
-                )
-            else:
-                crm_primary = bool(getattr(crm_action, "primary_for_goal", False))
-                crm_status = ads_ai_enum_name(getattr(crm_action, "status", None))
-                crm_type = ads_ai_enum_name(getattr(crm_action, "type_", None))
-                if not crm_type:
-                    crm_type = ads_ai_enum_name(getattr(crm_action, "type", None))
-                crm_origin = ads_ai_enum_name(getattr(crm_action, "origin", None))
-                crm_resource = str(getattr(crm_action, "resource_name", "") or "")
+            with st.form("crm_followup_form", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    crm_lead_id = st.text_input(
+                        "Lead ID",
+                        value=f"HK-{datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%Y%m%d-%H%M%S')}",
+                        help="Unique internal ID for this lead.",
+                    ).strip()
+                    crm_phone = st.text_input(
+                        "Customer phone number",
+                        placeholder="Enter the number from your phone/CRM",
+                    ).strip()
+                    crm_name = st.text_input(
+                        "Customer name (optional)",
+                        placeholder="Name",
+                    ).strip()
 
-                info_col1, info_col2, info_col3, info_col4 = st.columns(4)
-                info_col1.metric("Conversion Action", crm_action_name)
-                info_col2.metric("Optimization", "Primary" if crm_primary else "Secondary")
-                info_col3.metric("Status", crm_status or "Unknown")
-                info_col4.metric("Type", crm_type or crm_origin or "Unknown")
-
-                if crm_primary:
-                    st.warning(
-                        "Qualified Lead - CRM is currently Primary. For initial testing, "
-                        "keep it Secondary so it does not change bidding until imports are verified."
+                with c2:
+                    crm_call_date = st.date_input(
+                        "Original ad call date",
+                        value=today,
+                        max_value=today,
                     )
+                    crm_call_time = st.time_input(
+                        "Original ad call time",
+                        value=datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0),
+                    )
+                    crm_call_status = st.selectbox(
+                        "Original call status",
+                        ["Missed", "Received", "Unknown"],
+                    )
+
+                with c3:
+                    crm_followup_status = st.selectbox(
+                        "Follow-up status",
+                        [
+                            "Callback Pending",
+                            "Called Back",
+                            "Qualified Lead",
+                            "Not Qualified",
+                            "Customer Converted",
+                        ],
+                    )
+                    crm_service = st.selectbox(
+                        "Service",
+                        [
+                            "Elderly Care",
+                            "Patient Care",
+                            "Nursing Care",
+                            "Caretaker",
+                            "Baby Care",
+                            "Domestic Help",
+                            "Other",
+                        ],
+                    )
+                    crm_notes = st.text_area(
+                        "Notes",
+                        placeholder="Callback result / requirement / next action",
+                        height=90,
+                    ).strip()
+
+                crm_save = st.form_submit_button(
+                    "💾 Save CRM Follow-up",
+                    type="primary",
+                    width="stretch",
+                )
+
+            if crm_save:
+                if not crm_lead_id:
+                    st.error("Enter a Lead ID.")
+                elif not crm_phone:
+                    st.error("Enter the customer phone number from your own phone/CRM.")
                 else:
-                    st.success("Qualified Lead - CRM is Secondary (observe only).")
+                    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+                    new_row = {
+                        "Lead ID": crm_lead_id,
+                        "Customer": crm_name,
+                        "Phone": crm_phone,
+                        "Ad Call Date": str(crm_call_date),
+                        "Ad Call Time": crm_call_time.strftime("%H:%M:%S"),
+                        "Original Call": crm_call_status,
+                        "Follow-up Status": crm_followup_status,
+                        "Service": crm_service,
+                        "Notes": crm_notes,
+                        "Updated At": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
 
-                st.info(
-                    "Use this uploader only for leads that can be tied back to an ad click. "
-                    "If the lead came from a direct call asset and you do not have GCLID/GBRAID/WBRAID, "
-                    "do not invent an ID. That case needs a compatible call-upload or call-analytics attribution flow."
-                )
-
-                with st.form("crm_offline_conversion_form", clear_on_submit=False):
-                    form_col1, form_col2 = st.columns(2)
-
-                    with form_col1:
-                        crm_lead_id = st.text_input(
-                            "Lead / CRM ID",
-                            placeholder="Example: HK-LEAD-20260907-001",
-                            help="Use a unique internal lead ID. It is sent as order_id for deduplication.",
-                        ).strip()
-                        crm_click_id_type = st.selectbox(
-                            "Google Ads click ID type",
-                            ["GCLID", "GBRAID", "WBRAID"],
-                        )
-                        crm_click_id = st.text_input(
-                            f"{crm_click_id_type}",
-                            placeholder=f"Paste the {crm_click_id_type} captured for this lead",
-                        ).strip()
-
-                    with form_col2:
-                        crm_conversion_date = st.date_input(
-                            "Qualified lead date",
-                            value=today,
-                            max_value=today,
-                        )
-                        crm_conversion_time = st.time_input(
-                            "Qualified lead time (India)",
-                            value=datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0),
-                        )
-                        crm_use_value = st.checkbox(
-                            "Send a lead value",
-                            value=False,
-                            help="Leave off while testing unless you have a real business value for the lead.",
-                        )
-                        crm_conversion_value = None
-                        if crm_use_value:
-                            crm_conversion_value = st.number_input(
-                                "Qualified lead value (₹)",
-                                min_value=0.0,
-                                value=1.0,
-                                step=100.0,
-                            )
-
-                    crm_validate_only = st.checkbox(
-                        "Validate only (recommended for first test)",
-                        value=True,
-                        help="Checks the API request without recording a conversion. Uncheck only after validation succeeds.",
+                    rows = st.session_state.crm_followup_rows
+                    existing_idx = next(
+                        (i for i, r in enumerate(rows) if str(r.get("Lead ID", "")) == crm_lead_id),
+                        None,
                     )
-
-                    crm_submit = st.form_submit_button(
-                        "🧪 Validate Offline Conversion" if crm_validate_only else "⬆️ Upload Qualified Lead",
-                        type="primary",
-                        width="stretch",
-                    )
-
-                if crm_submit:
-                    crm_errors = []
-                    if not crm_lead_id:
-                        crm_errors.append("Enter a unique Lead / CRM ID.")
-                    if not crm_click_id:
-                        crm_errors.append(f"Enter the {crm_click_id_type} captured for this lead.")
-                    if not crm_resource:
-                        crm_errors.append("Conversion action resource could not be resolved.")
-
-                    if crm_errors:
-                        for crm_error in crm_errors:
-                            st.error(crm_error)
+                    if existing_idx is None:
+                        rows.append(new_row)
+                        st.success("CRM lead saved.")
                     else:
-                        crm_conversion_dt = crm_format_conversion_datetime(
-                            crm_conversion_date,
-                            crm_conversion_time,
-                        )
+                        rows[existing_idx] = new_row
+                        st.success("CRM lead updated.")
 
-                        try:
-                            with st.spinner(
-                                "Validating offline conversion..."
-                                if crm_validate_only
-                                else "Uploading qualified lead to Google Ads..."
-                            ):
-                                crm_upload_result = crm_upload_click_conversion(
-                                    client=client,
-                                    customer_id=customer_id,
-                                    conversion_action_resource=crm_resource,
-                                    click_id_type=crm_click_id_type,
-                                    click_id=crm_click_id,
-                                    conversion_date_time=crm_conversion_dt,
-                                    order_id=crm_lead_id,
-                                    conversion_value=(
-                                        float(crm_conversion_value)
-                                        if crm_use_value and crm_conversion_value is not None
-                                        else None
-                                    ),
-                                    currency_code="INR",
-                                    validate_only=crm_validate_only,
-                                )
+        crm_rows = st.session_state.get("crm_followup_rows", [])
+        if crm_rows:
+            crm_df = pd.DataFrame(crm_rows)
 
-                            if crm_upload_result.get("partial_failure"):
-                                st.error("Google Ads rejected the conversion request.")
-                                st.code(crm_upload_result["partial_failure"])
-                            elif crm_validate_only:
-                                st.success(
-                                    "Validation passed. No conversion was recorded. "
-                                    "Review the details, then uncheck Validate only and upload the real qualified lead."
-                                )
-                            else:
-                                st.success(
-                                    "Qualified Lead - CRM was submitted to Google Ads. "
-                                    "Reporting can take time to appear in All conversions."
-                                )
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("CRM Leads", len(crm_df))
+            k2.metric("Pending", int((crm_df["Follow-up Status"] == "Callback Pending").sum()))
+            k3.metric("Called Back", int((crm_df["Follow-up Status"] == "Called Back").sum()))
+            k4.metric("Qualified", int((crm_df["Follow-up Status"] == "Qualified Lead").sum()))
+            k5.metric("Customers", int((crm_df["Follow-up Status"] == "Customer Converted").sum()))
 
-                                if "crm_upload_session_log" not in st.session_state:
-                                    st.session_state.crm_upload_session_log = []
-                                st.session_state.crm_upload_session_log.append({
-                                    "Lead ID": crm_lead_id,
-                                    "ID Type": crm_click_id_type,
-                                    "Conversion Time": crm_conversion_dt,
-                                    "Value (₹)": (
-                                        float(crm_conversion_value)
-                                        if crm_use_value and crm_conversion_value is not None
-                                        else 0.0
-                                    ),
-                                    "Status": "Submitted",
-                                })
+            st.markdown("#### Follow-up list")
+            status_filter = st.multiselect(
+                "Filter follow-up status",
+                [
+                    "Callback Pending",
+                    "Called Back",
+                    "Qualified Lead",
+                    "Not Qualified",
+                    "Customer Converted",
+                ],
+                default=[],
+                key="crm_followup_status_filter",
+            )
+            crm_view_df = crm_df.copy()
+            if status_filter:
+                crm_view_df = crm_view_df[crm_view_df["Follow-up Status"].isin(status_filter)]
 
-                            if crm_upload_result.get("results"):
-                                with st.expander("Google Ads API result"):
-                                    st.json(crm_upload_result["results"])
+            st.dataframe(
+                crm_view_df,
+                width="stretch",
+                hide_index=True,
+            )
 
-                        except Exception as crm_upload_error:
-                            st.error("Offline conversion upload could not be completed.")
-                            st.code(str(crm_upload_error))
+            st.download_button(
+                "⬇️ Download CRM CSV",
+                data=crm_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"harekrishna_crm_followup_{today}.csv",
+                mime="text/csv",
+                width="stretch",
+            )
 
-                crm_session_log = st.session_state.get(
-                    "crm_upload_session_log",
-                    [],
-                )
-                if crm_session_log:
-                    st.markdown("#### This session's submitted CRM conversions")
-                    st.dataframe(
-                        pd.DataFrame(crm_session_log),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                    st.caption(
-                        "This is only a Streamlit session log, not a permanent CRM database."
-                    )
+            st.warning(
+                "Current CRM rows are stored in this Streamlit session only. "
+                "Download the CSV before a redeploy/restart if you want to keep them. "
+                "A later version can connect permanent storage such as Google Sheets/Database."
+            )
+
+            if st.button("🗑️ Clear CRM session data", key="crm_clear_session"):
+                st.session_state.crm_followup_rows = []
+                st.rerun()
+        else:
+            st.caption("No CRM follow-up leads saved in this session yet.")
+
+        with st.expander("Restore CRM rows from a previously downloaded CSV", expanded=False):
+            crm_restore_file = st.file_uploader(
+                "Upload CRM CSV",
+                type=["csv"],
+                key="crm_restore_csv",
+            )
+            if crm_restore_file is not None:
+                try:
+                    restored_df = pd.read_csv(crm_restore_file, dtype=str).fillna("")
+                    required_cols = {
+                        "Lead ID", "Phone", "Ad Call Date", "Ad Call Time",
+                        "Original Call", "Follow-up Status", "Service", "Updated At"
+                    }
+                    if not required_cols.issubset(set(restored_df.columns)):
+                        st.error("This CSV does not look like a V15 CRM export.")
+                    elif st.button("Restore these CRM rows", key="crm_restore_button"):
+                        st.session_state.crm_followup_rows = restored_df.to_dict("records")
+                        st.success("CRM rows restored for this session.")
+                        st.rerun()
+                except Exception as crm_restore_error:
+                    st.error(f"Could not read CRM CSV: {crm_restore_error}")
 
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
