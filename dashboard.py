@@ -22,7 +22,7 @@ CAMPAIGN_BUILDER_LANGUAGE_IDS = {
     "Telugu": "1131",
 }
 
-CAMPAIGN_BUILDER_BUILD = "2026-09-07-v22-correct-service-urls"
+CAMPAIGN_BUILDER_BUILD = "2026-09-07-v23-remove-comparison-daily-graphs"
 
 # ==================================================
 # CRM GOOGLE SHEETS PERMANENT STORAGE HELPERS (V17)
@@ -3794,23 +3794,6 @@ try:
 
 
         # ==================================================
-        # CAMPAIGN COMPARISON
-        # ==================================================
-
-        st.header("📈 Campaign Comparison")
-
-        st.subheader("Conversions by Campaign")
-
-        conversion_chart = filtered_df[
-            ["Campaign", "Conversions"]
-        ].set_index("Campaign")
-
-        st.bar_chart(
-            conversion_chart,
-            width="stretch"
-        )
-
-        # ==================================================
         # SEARCH TERMS ANALYSIS
         # ==================================================
 
@@ -3933,11 +3916,9 @@ try:
             )
 
         # ==================================================
-        # DAILY PERFORMANCE
+        # DAILY PERFORMANCE DATA (BACKEND ONLY)
+        # Retained for Before-vs-After / AI intelligence; graph removed in V23.
         # ==================================================
-
-        st.divider()
-        st.header("📅 Daily Performance")
 
         daily_query = f"""
             SELECT
@@ -4059,20 +4040,6 @@ try:
                     "CPC",
                     "CPA"
                 ]
-            )
-
-        if not daily_df.empty:
-            st.subheader("Daily Performance Trend")
-            st.caption(f"Scope: {analysis_scope_label}")
-
-            st.line_chart(
-                daily_df[["Clicks", "Conversions"]],
-                width="stretch"
-            )
-
-        else:
-            st.info(
-                "No daily performance data available for the selected campaign/date range."
             )
 
         # ==================================================
@@ -7812,7 +7779,7 @@ Use ₹ for money. Keep Google Ads terms such as CTR, CPC, CPA and Conversions i
                 f"Call conversion detected: {detected_call_action_name or 'Primary call action'} • threshold {detected_call_threshold}s"
             )
         else:
-            st.info("Click Refresh Live Tracking Check before final creation so V22 can verify the Primary phone-call conversion action.")
+            st.info("Click Refresh Live Tracking Check before final creation so V23 can verify the Primary phone-call conversion action.")
 
         call_col1, call_col2, call_col3 = st.columns([1, 2, 1])
         with call_col1:
