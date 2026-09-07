@@ -3,9 +3,10 @@ import pandas as pd
 import hashlib
 import json
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlparse
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from openai import OpenAI
@@ -2078,6 +2079,116 @@ def ads_ai_get_date_bounds(
 
     return today_value - timedelta(days=29), today_value
 
+
+
+
+# ==================================================
+# CRM OFFLINE CONVERSION UPLOAD HELPERS
+# ==================================================
+
+def crm_gaql_escape(value):
+    """Escape a string used inside a GAQL single-quoted literal."""
+    return str(value or "").replace("\\", "\\\\").replace("'", "\\'")
+
+
+def crm_find_conversion_action(ga_service, customer_id, action_name):
+    """Find exactly one conversion action by name without hard-coding its ID."""
+    safe_name = crm_gaql_escape(action_name)
+    query = f"""
+        SELECT
+            conversion_action.resource_name,
+            conversion_action.name,
+            conversion_action.status,
+            conversion_action.type,
+            conversion_action.category,
+            conversion_action.origin,
+            conversion_action.primary_for_goal
+        FROM conversion_action
+        WHERE conversion_action.name = '{safe_name}'
+        LIMIT 2
+    """
+    rows = list(
+        ga_service.search(
+            customer_id=str(customer_id),
+            query=query,
+        )
+    )
+    if not rows:
+        return None
+    return rows[0].conversion_action
+
+
+def crm_format_conversion_datetime(local_date, local_time):
+    """Format conversion time in the advertiser's India timezone."""
+    india_tz = ZoneInfo("Asia/Kolkata")
+    dt_value = datetime.combine(local_date, local_time).replace(tzinfo=india_tz)
+    return dt_value.strftime("%Y-%m-%d %H:%M:%S%z")[:-2] + ":" + dt_value.strftime("%z")[-2:]
+
+
+def crm_upload_click_conversion(
+    client,
+    customer_id,
+    conversion_action_resource,
+    click_id_type,
+    click_id,
+    conversion_date_time,
+    order_id,
+    conversion_value=None,
+    currency_code="INR",
+    validate_only=True,
+):
+    """Upload one click-attributed offline conversion using the Google Ads API."""
+    upload_service = client.get_service("ConversionUploadService")
+    conversion = client.get_type("ClickConversion")
+    conversion.conversion_action = str(conversion_action_resource)
+    conversion.conversion_date_time = str(conversion_date_time)
+
+    click_id_type = str(click_id_type or "").upper().strip()
+    click_id = str(click_id or "").strip()
+    if click_id_type == "GCLID":
+        conversion.gclid = click_id
+    elif click_id_type == "GBRAID":
+        conversion.gbraid = click_id
+    elif click_id_type == "WBRAID":
+        conversion.wbraid = click_id
+    else:
+        raise ValueError("Choose GCLID, GBRAID, or WBRAID.")
+
+    if order_id:
+        conversion.order_id = str(order_id).strip()
+
+    if conversion_value is not None:
+        conversion.conversion_value = float(conversion_value)
+        conversion.currency_code = str(currency_code or "INR")
+
+    request = client.get_type("UploadClickConversionsRequest")
+    request.customer_id = str(customer_id)
+    request.partial_failure = True
+    request.validate_only = bool(validate_only)
+    request.conversions.append(conversion)
+
+    response = upload_service.upload_click_conversions(request=request)
+
+    partial_failure = getattr(response, "partial_failure_error", None)
+    partial_failure_message = ""
+    if partial_failure and getattr(partial_failure, "code", 0):
+        partial_failure_message = str(getattr(partial_failure, "message", "") or partial_failure)
+
+    results = []
+    for result in list(getattr(response, "results", []) or []):
+        results.append({
+            "gclid": str(getattr(result, "gclid", "") or ""),
+            "gbraid": str(getattr(result, "gbraid", "") or ""),
+            "wbraid": str(getattr(result, "wbraid", "") or ""),
+            "conversion_action": str(getattr(result, "conversion_action", "") or ""),
+            "conversion_date_time": str(getattr(result, "conversion_date_time", "") or ""),
+        })
+
+    return {
+        "validate_only": bool(validate_only),
+        "partial_failure": partial_failure_message,
+        "results": results,
+    }
 
 def ads_ai_safe_search(
     ga_service,
@@ -8495,6 +8606,212 @@ JSON SCHEMA:
                                 builder_create_error
                             )
                         )
+
+        # ==================================================
+        # CRM OFFLINE QUALIFIED LEAD IMPORT
+        # ==================================================
+
+        st.divider()
+        st.header("🧾 CRM Offline Qualified Lead Import")
+        st.caption(
+            "Uploads a callback/CRM outcome to Google Ads only when a valid "
+            "Google Ads click identifier (GCLID / GBRAID / WBRAID) is available. "
+            "A manual callback by itself is not enough for click-attributed offline conversion import."
+        )
+
+        with st.expander("Open CRM offline conversion uploader", expanded=False):
+            crm_action_name = "Qualified Lead - CRM"
+
+            try:
+                crm_action = crm_find_conversion_action(
+                    ga_service=ga_service,
+                    customer_id=customer_id,
+                    action_name=crm_action_name,
+                )
+            except Exception as crm_lookup_error:
+                crm_action = None
+                st.error("Could not read the Qualified Lead - CRM conversion action.")
+                st.caption(f"Technical detail: {crm_lookup_error}")
+
+            if crm_action is None:
+                st.warning(
+                    "Qualified Lead - CRM was not found in this Google Ads account. "
+                    "Create that offline conversion action first, then return here."
+                )
+            else:
+                crm_primary = bool(getattr(crm_action, "primary_for_goal", False))
+                crm_status = ads_ai_enum_name(getattr(crm_action, "status", None))
+                crm_type = ads_ai_enum_name(getattr(crm_action, "type_", None))
+                if not crm_type:
+                    crm_type = ads_ai_enum_name(getattr(crm_action, "type", None))
+                crm_origin = ads_ai_enum_name(getattr(crm_action, "origin", None))
+                crm_resource = str(getattr(crm_action, "resource_name", "") or "")
+
+                info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+                info_col1.metric("Conversion Action", crm_action_name)
+                info_col2.metric("Optimization", "Primary" if crm_primary else "Secondary")
+                info_col3.metric("Status", crm_status or "Unknown")
+                info_col4.metric("Type", crm_type or crm_origin or "Unknown")
+
+                if crm_primary:
+                    st.warning(
+                        "Qualified Lead - CRM is currently Primary. For initial testing, "
+                        "keep it Secondary so it does not change bidding until imports are verified."
+                    )
+                else:
+                    st.success("Qualified Lead - CRM is Secondary (observe only).")
+
+                st.info(
+                    "Use this uploader only for leads that can be tied back to an ad click. "
+                    "If the lead came from a direct call asset and you do not have GCLID/GBRAID/WBRAID, "
+                    "do not invent an ID. That case needs a compatible call-upload or call-analytics attribution flow."
+                )
+
+                with st.form("crm_offline_conversion_form", clear_on_submit=False):
+                    form_col1, form_col2 = st.columns(2)
+
+                    with form_col1:
+                        crm_lead_id = st.text_input(
+                            "Lead / CRM ID",
+                            placeholder="Example: HK-LEAD-20260907-001",
+                            help="Use a unique internal lead ID. It is sent as order_id for deduplication.",
+                        ).strip()
+                        crm_click_id_type = st.selectbox(
+                            "Google Ads click ID type",
+                            ["GCLID", "GBRAID", "WBRAID"],
+                        )
+                        crm_click_id = st.text_input(
+                            f"{crm_click_id_type}",
+                            placeholder=f"Paste the {crm_click_id_type} captured for this lead",
+                        ).strip()
+
+                    with form_col2:
+                        crm_conversion_date = st.date_input(
+                            "Qualified lead date",
+                            value=today,
+                            max_value=today,
+                        )
+                        crm_conversion_time = st.time_input(
+                            "Qualified lead time (India)",
+                            value=datetime.now(ZoneInfo("Asia/Kolkata")).time().replace(microsecond=0),
+                        )
+                        crm_use_value = st.checkbox(
+                            "Send a lead value",
+                            value=False,
+                            help="Leave off while testing unless you have a real business value for the lead.",
+                        )
+                        crm_conversion_value = None
+                        if crm_use_value:
+                            crm_conversion_value = st.number_input(
+                                "Qualified lead value (₹)",
+                                min_value=0.0,
+                                value=1.0,
+                                step=100.0,
+                            )
+
+                    crm_validate_only = st.checkbox(
+                        "Validate only (recommended for first test)",
+                        value=True,
+                        help="Checks the API request without recording a conversion. Uncheck only after validation succeeds.",
+                    )
+
+                    crm_submit = st.form_submit_button(
+                        "🧪 Validate Offline Conversion" if crm_validate_only else "⬆️ Upload Qualified Lead",
+                        type="primary",
+                        width="stretch",
+                    )
+
+                if crm_submit:
+                    crm_errors = []
+                    if not crm_lead_id:
+                        crm_errors.append("Enter a unique Lead / CRM ID.")
+                    if not crm_click_id:
+                        crm_errors.append(f"Enter the {crm_click_id_type} captured for this lead.")
+                    if not crm_resource:
+                        crm_errors.append("Conversion action resource could not be resolved.")
+
+                    if crm_errors:
+                        for crm_error in crm_errors:
+                            st.error(crm_error)
+                    else:
+                        crm_conversion_dt = crm_format_conversion_datetime(
+                            crm_conversion_date,
+                            crm_conversion_time,
+                        )
+
+                        try:
+                            with st.spinner(
+                                "Validating offline conversion..."
+                                if crm_validate_only
+                                else "Uploading qualified lead to Google Ads..."
+                            ):
+                                crm_upload_result = crm_upload_click_conversion(
+                                    client=client,
+                                    customer_id=customer_id,
+                                    conversion_action_resource=crm_resource,
+                                    click_id_type=crm_click_id_type,
+                                    click_id=crm_click_id,
+                                    conversion_date_time=crm_conversion_dt,
+                                    order_id=crm_lead_id,
+                                    conversion_value=(
+                                        float(crm_conversion_value)
+                                        if crm_use_value and crm_conversion_value is not None
+                                        else None
+                                    ),
+                                    currency_code="INR",
+                                    validate_only=crm_validate_only,
+                                )
+
+                            if crm_upload_result.get("partial_failure"):
+                                st.error("Google Ads rejected the conversion request.")
+                                st.code(crm_upload_result["partial_failure"])
+                            elif crm_validate_only:
+                                st.success(
+                                    "Validation passed. No conversion was recorded. "
+                                    "Review the details, then uncheck Validate only and upload the real qualified lead."
+                                )
+                            else:
+                                st.success(
+                                    "Qualified Lead - CRM was submitted to Google Ads. "
+                                    "Reporting can take time to appear in All conversions."
+                                )
+
+                                if "crm_upload_session_log" not in st.session_state:
+                                    st.session_state.crm_upload_session_log = []
+                                st.session_state.crm_upload_session_log.append({
+                                    "Lead ID": crm_lead_id,
+                                    "ID Type": crm_click_id_type,
+                                    "Conversion Time": crm_conversion_dt,
+                                    "Value (₹)": (
+                                        float(crm_conversion_value)
+                                        if crm_use_value and crm_conversion_value is not None
+                                        else 0.0
+                                    ),
+                                    "Status": "Submitted",
+                                })
+
+                            if crm_upload_result.get("results"):
+                                with st.expander("Google Ads API result"):
+                                    st.json(crm_upload_result["results"])
+
+                        except Exception as crm_upload_error:
+                            st.error("Offline conversion upload could not be completed.")
+                            st.code(str(crm_upload_error))
+
+                crm_session_log = st.session_state.get(
+                    "crm_upload_session_log",
+                    [],
+                )
+                if crm_session_log:
+                    st.markdown("#### This session's submitted CRM conversions")
+                    st.dataframe(
+                        pd.DataFrame(crm_session_log),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "This is only a Streamlit session log, not a permanent CRM database."
+                    )
 
         st.divider()
         st.header("🤖 Ask AI About Your Campaign")
