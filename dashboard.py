@@ -2358,6 +2358,7 @@ st.markdown("""
 
 date_options = [
     "Today",
+    "Yesterday",
     "Last 7 Days",
     "Last 30 Days",
     "Last 90 Days",
@@ -2389,6 +2390,9 @@ today = date.today()
 
 if date_option == "Today":
     date_filter_clause = "segments.date DURING TODAY"
+
+elif date_option == "Yesterday":
+    date_filter_clause = "segments.date DURING YESTERDAY"
 
 elif date_option == "Last 7 Days":
     date_filter_clause = "segments.date DURING LAST_7_DAYS"
@@ -2486,6 +2490,10 @@ def ads_ai_get_date_bounds(
     """Return inclusive Python date bounds for CallView filtering."""
     if date_option == "Today":
         return today_value, today_value
+
+    if date_option == "Yesterday":
+        yesterday_value = today_value - timedelta(days=1)
+        return yesterday_value, yesterday_value
 
     if date_option == "Last 7 Days":
         return today_value - timedelta(days=6), today_value
@@ -6286,6 +6294,9 @@ try:
             if date_option == "Today":
                 report_period = "Today's"
 
+            elif date_option == "Yesterday":
+                report_period = "Yesterday's"
+
             elif date_option == "Custom Date Range":
                 report_period = (
                     f"{start_date.strftime('%d %b %Y')} → "
@@ -10000,6 +10011,16 @@ try:
                     requested_date_option = None
 
                     if any(
+                        phrase in question_lower
+                        for phrase in [
+                            "yesterday",
+                            "నిన్న",
+                            "ninna"
+                        ]
+                    ):
+                        requested_date_option = "Yesterday"
+
+                    elif any(
                         phrase in question_lower
                         for phrase in [
                             "today",
